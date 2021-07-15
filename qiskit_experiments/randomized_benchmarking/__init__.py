@@ -21,6 +21,7 @@ Experiments
 ===========
 .. autosummary::
     :toctree: ../stubs/
+    :template: autosummary/experiment.rst
 
     StandardRB
     InterleavedRB
@@ -31,6 +32,7 @@ Analysis
 
 .. autosummary::
     :toctree: ../stubs/
+    :template: autosummary/analysis.rst
 
     RBAnalysis
     InterleavedRBAnalysis

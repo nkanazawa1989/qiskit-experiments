@@ -77,11 +77,15 @@ class RBAnalysis(CurveAnalysis):
 
     @classmethod
     def _default_options(cls):
-        """Return default options.
+        """Default analysis options.
 
-        See :meth:`~qiskit_experiment.analysis.CurveAnalysis._default_options` for
-        descriptions of analysis options.
+        Analysis Options:
+            error_dict (SomeType): Some docs.
+            epg_1_qubit (SomeType): Some docs.
+            gate_error_ratio (SomeType): Some docs.
+
         """
+
         default_options = super()._default_options()
         default_options.p0 = {"a": None, "alpha": None, "b": None}
         default_options.bounds = {"a": (0.0, 1.0), "alpha": (0.0, 1.0), "b": (0.0, 1.0)}

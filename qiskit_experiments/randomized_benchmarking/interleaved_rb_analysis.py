@@ -122,11 +122,7 @@ class InterleavedRBAnalysis(RBAnalysis):
 
     @classmethod
     def _default_options(cls):
-        """Return default data processing options.
-
-        See :meth:`~qiskit_experiment.analysis.CurveAnalysis._default_options` for
-        descriptions of analysis options.
-        """
+        """Default analysis options."""
         default_options = super()._default_options()
         default_options.p0 = {"a": None, "alpha": None, "alpha_c": None, "b": None}
         default_options.bounds = {

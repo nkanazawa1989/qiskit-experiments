@@ -134,6 +134,13 @@ class StandardRB(BaseExperiment):
 
     @classmethod
     def _default_experiment_options(cls):
+        """Default experiment options.
+
+        Experiment Options:
+            lengths (SomeType): Some docs.
+            num_samples (SomeType): Some docs.
+
+        """
         return Options(lengths=None, num_samples=None)
 
     # pylint: disable = arguments-differ
