@@ -22,7 +22,7 @@ from qiskit.providers.backend import Backend
 from uncertainties.core import UFloat
 
 from qiskit_experiments.database_service.device_component import Qubit
-from qiskit_experiments.framework import DbAnalysisResultV1, AnalysisResultData
+from qiskit_experiments.framework import DbAnalysisResultV1, AnalysisResult
 
 
 class RBUtils:
@@ -223,7 +223,7 @@ class RBUtils:
         qubits: Sequence[int],
         gate_error_ratio: Dict[str, float],
         gates_per_clifford: Dict[Tuple[Sequence[int], str], float],
-        epg_1_qubit: Optional[List[Union[DbAnalysisResultV1, AnalysisResultData]]] = None,
+        epg_1_qubit: Optional[List[Union[DbAnalysisResultV1, AnalysisResult]]] = None,
         gate_2_qubit_type: Optional[str] = "cx",
     ) -> Dict[int, Dict[str, UFloat]]:
         r"""

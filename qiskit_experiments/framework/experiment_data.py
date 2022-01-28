@@ -24,6 +24,7 @@ from qiskit_experiments.database_service.database_service import (
     DatabaseServiceV1 as DatabaseService,
 )
 from qiskit_experiments.database_service.utils import ThreadSafeOrderedDict
+from qiskit_experiments.framework.analysis_result_data import AnalysisResult
 
 if TYPE_CHECKING:
     # There is a cyclical dependency here, but the name needs to exist for
@@ -37,6 +38,7 @@ LOG = logging.getLogger(__name__)
 
 class ExperimentData(DbExperimentData):
     """Qiskit Experiments Data container class"""
+    _analysis_res_cls = AnalysisResult
 
     def __init__(
         self,
@@ -161,12 +163,45 @@ class ExperimentData(DbExperimentData):
 
     @classmethod
     def load(cls, experiment_id: str, service: DatabaseService) -> ExperimentData:
-        expdata = DbExperimentData.load(experiment_id, service)
-        expdata.__class__ = ExperimentData
-        expdata._experiment = None
+        service_data = service.experiment(experiment_id, json_decoder=cls._json_decoder)
+        metadata = service_data.pop("metadata")
+        source = metadata.pop("_source")
+
+        expdata = ExperimentData(
+            backend=service_data.pop("backend"),
+            parent_id=service_data.pop("parent_id", None),
+            job_ids=service_data.pop("job_ids"),
+        )
+        expdata._type = service_data.pop("experiment_type")
+        expdata._id = service_data.pop("experiment_id")
+        expdata._metadata = metadata
+        expdata._source = source
+        expdata._figures = ThreadSafeOrderedDict(service_data.pop("figure_names"))
+        expdata._share_level = service_data.pop("share_level")
+        expdata._created_in_db = True
+
+        expdata.tags = service_data.pop("tags")
+        expdata.notes = service_data.pop("notes")
+        expdata._extra_data = service_data
+
+        if expdata.service is None:
+            expdata.service = service
+
+        # retrieve job data
+        expdata._retrieve_data()
+
+        # This method should be called from proper child class to instantiate
+        # the expected analysis container.
+        # The analysis result container type is defined in cls._analysis_res_cls
+        # Note that just swapping class type doesn't work in this case
+        # because AnalysisResult class implements formatter for FitVal in own loader.
+        expdata._retrieve_analysis_results()
+
+        # load child data
         child_data_ids = expdata.metadata.pop("child_data_ids", [])
         child_data = [ExperimentData.load(child_id, service) for child_id in child_data_ids]
         expdata._set_child_data(child_data)
+
         return expdata
 
     def copy(self, copy_results=True) -> "ExperimentData":

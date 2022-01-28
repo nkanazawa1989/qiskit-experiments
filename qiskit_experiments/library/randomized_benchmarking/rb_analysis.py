@@ -18,8 +18,7 @@ from typing import List, Union
 import numpy as np
 import qiskit_experiments.curve_analysis as curve
 from qiskit_experiments.curve_analysis.data_processing import multi_mean_xy_data, data_sort
-from qiskit_experiments.database_service.device_component import Qubit
-from qiskit_experiments.framework import AnalysisResultData
+from qiskit_experiments.framework import AnalysisResult
 
 from .rb_utils import RBUtils
 
@@ -162,7 +161,7 @@ class RBAnalysis(curve.CurveAnalysis):
             data_index=series,
         )
 
-    def _extra_database_entry(self, fit_data: curve.FitData) -> List[AnalysisResultData]:
+    def _extra_database_entry(self, fit_data: curve.FitData) -> List[AnalysisResult]:
         """Calculate EPC."""
         extra_entries = []
 
@@ -172,7 +171,7 @@ class RBAnalysis(curve.CurveAnalysis):
         epc = scale * (1 - alpha)
 
         extra_entries.append(
-            AnalysisResultData(
+            AnalysisResult(
                 name="EPC",
                 value=epc,
                 chisq=fit_data.reduced_chisq,
@@ -224,12 +223,11 @@ class RBAnalysis(curve.CurveAnalysis):
                 for qubits, gate_dict in epg_dict.items():
                     for gate, value in gate_dict.items():
                         extra_entries.append(
-                            AnalysisResultData(
+                            AnalysisResult(
                                 f"EPG_{gate}",
                                 value,
                                 chisq=fit_data.reduced_chisq,
                                 quality=self._evaluate_quality(fit_data),
-                                device_components=[Qubit(i) for i in qubits],
                             )
                         )
         return extra_entries

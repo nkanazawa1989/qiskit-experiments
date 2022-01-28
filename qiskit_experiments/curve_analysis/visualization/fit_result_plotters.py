@@ -30,7 +30,7 @@ from uncertainties.core import UFloat
 from qiskit.utils import detach_prefix
 
 from qiskit_experiments.curve_analysis.curve_data import SeriesDef, FitData, CurveData
-from qiskit_experiments.framework import AnalysisResultData
+from qiskit_experiments.framework import AnalysisResult
 from qiskit_experiments.framework.matplotlib import get_non_gui_ax
 from .curves import plot_scatter, plot_errorbar, plot_curve_fit
 from .style import PlotterStyle
@@ -47,7 +47,7 @@ class MplDrawSingleCanvas:
         fit_samples: List[CurveData],
         tick_labels: Dict[str, str],
         fit_data: FitData,
-        result_entries: List[AnalysisResultData],
+        result_entries: List[AnalysisResult],
         style: Optional[PlotterStyle] = None,
         axis: Optional["matplotlib.axes.Axes"] = None,
     ) -> "pyplot.Figure":
@@ -146,7 +146,7 @@ class MplDrawMultiCanvasVstack:
         fit_samples: List[CurveData],
         tick_labels: Dict[str, str],
         fit_data: FitData,
-        result_entries: List[AnalysisResultData],
+        result_entries: List[AnalysisResult],
         style: Optional[PlotterStyle] = None,
         axis: Optional["matplotlib.axes.Axes"] = None,
     ) -> "pyplot.Figure":
@@ -336,7 +336,7 @@ def draw_single_curve_mpl(
         )
 
 
-def write_fit_report(result_entries: List[AnalysisResultData]) -> str:
+def write_fit_report(result_entries: List[AnalysisResult]) -> str:
     """A function that generates fit reports documentation from list of data.
 
     Args:

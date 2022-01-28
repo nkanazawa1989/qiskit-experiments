@@ -23,8 +23,8 @@ from qiskit_experiments.framework import Options
 from qiskit_experiments.framework.store_init_args import StoreInitArgs
 from qiskit_experiments.framework.experiment_data import ExperimentData
 from qiskit_experiments.framework.configs import AnalysisConfig
-from qiskit_experiments.framework.analysis_result_data import AnalysisResultData
-from qiskit_experiments.database_service import DbAnalysisResultV1
+from qiskit_experiments.framework.analysis_result_data import AnalysisResult
+from qiskit_experiments.database_service.device_component import DeviceComponent
 
 
 class BaseAnalysis(ABC, StoreInitArgs):
@@ -179,30 +179,23 @@ class BaseAnalysis(ABC, StoreInitArgs):
 
         return experiment_data
 
-    def _format_analysis_result(self, data, experiment_id, experiment_components=None):
+    def _format_analysis_result(
+        self,
+        data: AnalysisResult,
+        experiment_id: str,
+        experiment_components: List[Union[str, DeviceComponent]] = None,
+    ):
         """Format run analysis result to DbAnalysisResult"""
-        device_components = []
-        if data.device_components:
-            device_components = data.device_components
-        elif experiment_components:
-            device_components = experiment_components
-
-        return DbAnalysisResultV1(
-            name=data.name,
-            value=data.value,
-            device_components=device_components,
-            experiment_id=experiment_id,
-            chisq=data.chisq,
-            quality=data.quality,
-            unit=data.unit,
-            extra=data.extra,
-        )
+        data.experiment_id = experiment_id
+        if not data.device_components:
+            data.device_components = experiment_components
+        return data
 
     @abstractmethod
     def _run_analysis(
         self,
         experiment_data: ExperimentData,
-    ) -> Tuple[List[AnalysisResultData], List["matplotlib.figure.Figure"]]:
+    ) -> Tuple[List[AnalysisResult], List["matplotlib.figure.Figure"]]:
         """Run analysis on circuit data.
 
         Args:
@@ -210,7 +203,7 @@ class BaseAnalysis(ABC, StoreInitArgs):
 
         Returns:
             A pair ``(analysis_results, figures)`` where ``analysis_results``
-            is a list of :class:`AnalysisResultData` objects, and ``figures``
+            is a list of :class:`AnalysisResult` objects, and ``figures``
             is a list of any figures for the experiment.
 
         Raises:

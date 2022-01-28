@@ -20,7 +20,7 @@ from typing import Optional
 import numpy as np
 from uncertainties import ufloat
 
-from qiskit_experiments.framework import BaseAnalysis, AnalysisResultData, Options
+from qiskit_experiments.framework import BaseAnalysis, AnalysisResult, Options
 from qiskit_experiments.curve_analysis import plot_scatter, plot_errorbar
 
 
@@ -205,7 +205,7 @@ class QuantumVolumeAnalysis(BaseAnalysis):
             quantum_volume = 2 ** depth
             success = True
 
-        hop_result = AnalysisResultData(
+        hop_result = AnalysisResult(
             "mean_HOP",
             value=ufloat(nominal_value=mean_hop, std_dev=sigma_hop),
             quality=quality,
@@ -217,7 +217,7 @@ class QuantumVolumeAnalysis(BaseAnalysis):
             },
         )
 
-        qv_result = AnalysisResultData(
+        qv_result = AnalysisResult(
             "quantum_volume",
             value=quantum_volume,
             quality=quality,
@@ -232,7 +232,7 @@ class QuantumVolumeAnalysis(BaseAnalysis):
 
     @staticmethod
     def _format_plot(
-        hop_result: AnalysisResultData, ax: Optional["matplotlib.pyplot.AxesSubplot"] = None
+        hop_result: AnalysisResult, ax: Optional["matplotlib.pyplot.AxesSubplot"] = None
     ):
         """Format the QV plot
 
