@@ -13,7 +13,7 @@
 """A FakeExperiment for testing."""
 
 import numpy as np
-from qiskit_experiments.framework import BaseExperiment, BaseAnalysis, Options, AnalysisResultData
+from qiskit_experiments.framework import BaseExperiment, BaseAnalysis, Options, AnalysisResult
 
 
 class FakeAnalysis(BaseAnalysis):
@@ -29,7 +29,7 @@ class FakeAnalysis(BaseAnalysis):
         seed = options.get("seed", None)
         rng = np.random.default_rng(seed=seed)
         analysis_results = [
-            AnalysisResultData(f"result_{i}", value) for i, value in enumerate(rng.random(3))
+            AnalysisResult(f"result_{i}", value) for i, value in enumerate(rng.random(3))
         ]
         return analysis_results, None
 

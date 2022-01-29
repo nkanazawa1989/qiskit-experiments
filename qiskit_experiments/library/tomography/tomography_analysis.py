@@ -25,7 +25,7 @@ from qiskit.quantum_info.operators.base_operator import BaseOperator
 from qiskit.quantum_info.operators.channel.quantum_channel import QuantumChannel
 
 from qiskit_experiments.exceptions import AnalysisError
-from qiskit_experiments.framework import BaseAnalysis, AnalysisResultData, Options
+from qiskit_experiments.framework import BaseAnalysis, AnalysisResult, Options
 from .fitters import (
     linear_inversion,
     scipy_linear_lstsq,
@@ -179,7 +179,7 @@ class TomographyAnalysis(BaseAnalysis):
             rescaled_trace = True
 
         # Compute state with rescaled eigenvalues
-        state_result = AnalysisResultData("state", state, extra=metadata)
+        state_result = AnalysisResult("state", state, extra=metadata)
         state_result.extra["eigvals"] = scaled_evals
         if rescaled_psd or rescaled_trace:
             state = state_cls(evecs @ (scaled_evals * evecs).T.conj())
@@ -245,7 +245,7 @@ class TomographyAnalysis(BaseAnalysis):
         cond = np.sum(np.abs(evals[evals < 0]))
         is_pos = bool(np.isclose(cond, 0))
         name = "completely_positive" if qpt else "positive"
-        result = AnalysisResultData(name, is_pos)
+        result = AnalysisResult(name, is_pos)
         if not is_pos:
             result.extra = {"delta": cond}
         return result
@@ -259,7 +259,7 @@ class TomographyAnalysis(BaseAnalysis):
         kraus_cond = np.einsum("i,ija,ijb->ab", evals, mats.conj(), mats)
         cond = np.sum(np.abs(la.eigvalsh(kraus_cond - np.eye(dim))))
         is_tp = bool(np.isclose(cond, 0))
-        result = AnalysisResultData("trace_preserving", is_tp)
+        result = AnalysisResult("trace_preserving", is_tp)
         if not is_tp:
             result.extra = {"delta": cond}
         return result
@@ -286,7 +286,7 @@ class TomographyAnalysis(BaseAnalysis):
             sqrt_rho = evecs @ (np.sqrt(evals / trace) * evecs).T.conj()
             eig = la.eigvalsh(sqrt_rho @ target_state @ sqrt_rho)
             fidelity = np.sum(np.sqrt(np.maximum(eig, 0))) ** 2
-        return AnalysisResultData(name, fidelity)
+        return AnalysisResult(name, fidelity)
 
     @staticmethod
     def _fitter_data(

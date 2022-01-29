@@ -43,7 +43,7 @@ from qiskit_experiments.exceptions import AnalysisError
 from qiskit_experiments.framework import (
     BaseAnalysis,
     ExperimentData,
-    AnalysisResultData,
+    AnalysisResult,
     Options,
 )
 
@@ -203,7 +203,7 @@ class CurveAnalysis(BaseAnalysis, ABC):
 
         - Create extra data from fit result:
             Override :meth:`~self._extra_database_entry`. You need to return a list of
-            :class:`~qiskit_experiments.framework.analysis_result_data.AnalysisResultData`
+            :class:`~qiskit_experiments.framework.analysis_result_data.AnalysisResult`
             object. This returns an empty list by default.
 
         - Customize fit quality evaluation:
@@ -496,7 +496,7 @@ class CurveAnalysis(BaseAnalysis, ABC):
         )
 
     # pylint: disable=unused-argument
-    def _extra_database_entry(self, fit_data: FitData) -> List[AnalysisResultData]:
+    def _extra_database_entry(self, fit_data: FitData) -> List[AnalysisResult]:
         """Calculate new quantity from the fit result.
 
         Subclasses can override this method to do post analysis.
@@ -746,7 +746,7 @@ class CurveAnalysis(BaseAnalysis, ABC):
 
     def _run_analysis(
         self, experiment_data: ExperimentData
-    ) -> Tuple[List[AnalysisResultData], List["pyplot.Figure"]]:
+    ) -> Tuple[List[AnalysisResult], List["pyplot.Figure"]]:
         #
         # 1. Parse arguments
         #
@@ -868,7 +868,7 @@ class CurveAnalysis(BaseAnalysis, ABC):
 
             # overview entry
             analysis_results.append(
-                AnalysisResultData(
+                AnalysisResult(
                     name=PARAMS_ENTRY_PREFIX + self.__class__.__name__,
                     value=[p.nominal_value for p in fit_result.popt],
                     chisq=fit_result.reduced_chisq,
@@ -895,7 +895,7 @@ class CurveAnalysis(BaseAnalysis, ABC):
                         p_name = param_repr
                         p_repr = param_repr
                         unit = None
-                    result_entry = AnalysisResultData(
+                    result_entry = AnalysisResult(
                         name=p_repr,
                         value=fit_result.fitval(p_name),
                         unit=unit,
@@ -918,7 +918,7 @@ class CurveAnalysis(BaseAnalysis, ABC):
                     "ydata": series_data.y,
                     "sigma": series_data.y_err,
                 }
-            raw_data_entry = AnalysisResultData(
+            raw_data_entry = AnalysisResult(
                 name=DATA_ENTRY_PREFIX + self.__class__.__name__,
                 value=raw_data_dict,
                 extra={

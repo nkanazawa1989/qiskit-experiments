@@ -16,7 +16,7 @@ from typing import List, Union
 
 import numpy as np
 import qiskit_experiments.curve_analysis as curve
-from qiskit_experiments.framework import AnalysisResultData
+from qiskit_experiments.framework import AnalysisResult
 
 from .rb_analysis import RBAnalysis
 
@@ -161,7 +161,7 @@ class InterleavedRBAnalysis(RBAnalysis):
 
         return user_opt
 
-    def _extra_database_entry(self, fit_data: curve.FitData) -> List[AnalysisResultData]:
+    def _extra_database_entry(self, fit_data: curve.FitData) -> List[AnalysisResult]:
         """Calculate EPC."""
         nrb = 2 ** self._num_qubits
         scale = (nrb - 1) / nrb
@@ -183,7 +183,7 @@ class InterleavedRBAnalysis(RBAnalysis):
         systematic_err_l = epc.n - systematic_err
         systematic_err_r = epc.n + systematic_err
 
-        extra_data = AnalysisResultData(
+        extra_data = AnalysisResult(
             name="EPC",
             value=epc,
             chisq=fit_data.reduced_chisq,

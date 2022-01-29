@@ -187,7 +187,7 @@ overriden to define default values for these options.
 
 The :meth:`BaseAnalysis._run_analysis` method should return a pair
 ``(results, figures)`` where ``results`` is a list of
-:class:`AnalysisResultData` and ``figures`` is a list of
+:class:`AnalysisResult` and ``figures`` is a list of
 :class:`matplotlib.figure.Figure`.
 
 The :mod:`qiskit_experiments.data_processing` module contains classes for
@@ -207,6 +207,7 @@ Experiment Data Classes
     JobStatus
     AnalysisStatus
     FitVal
+    AnalysisResult
     AnalysisResultData
     ExperimentConfig
     AnalysisConfig
@@ -246,7 +247,7 @@ from qiskit_experiments.database_service.db_experiment_data import (
 from .base_analysis import BaseAnalysis
 from .base_experiment import BaseExperiment
 from .configs import ExperimentConfig, AnalysisConfig
-from .analysis_result_data import AnalysisResultData
+from .analysis_result_data import AnalysisResultData, AnalysisResult
 from .experiment_data import ExperimentData
 from .composite import (
     ParallelExperiment,

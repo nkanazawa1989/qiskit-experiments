@@ -128,6 +128,7 @@ class DbExperimentDataV1(DbExperimentData):
     verbose = True  # Whether to print messages to the standard output.
     _metadata_version = 1
     _job_executor = futures.ThreadPoolExecutor()
+    _analysis_res_cls = DbAnalysisResult
 
     _json_encoder = ExperimentEncoder
     _json_decoder = ExperimentDecoder
@@ -812,7 +813,7 @@ class DbExperimentDataV1(DbExperimentData):
             )
             for result in retrieved_results:
                 result_id = result["result_id"]
-                self._analysis_results[result_id] = DbAnalysisResult._from_service_data(result)
+                self._analysis_results[result_id] = self._analysis_res_cls._from_service_data(result)
 
     def analysis_results(
         self,
@@ -1008,10 +1009,7 @@ class DbExperimentDataV1(DbExperimentData):
         service_data = service.experiment(experiment_id, json_decoder=cls._json_decoder)
 
         # Parse serialized metadata
-        metadata = service_data.pop("metadata")
-
-        # Initialize container
-        expdata = DbExperimentDataV1(
+        expdata = cls(
             experiment_type=service_data.pop("experiment_type"),
             backend=service_data.pop("backend"),
             experiment_id=service_data.pop("experiment_id"),
@@ -1019,7 +1017,7 @@ class DbExperimentDataV1(DbExperimentData):
             tags=service_data.pop("tags"),
             job_ids=service_data.pop("job_ids"),
             share_level=service_data.pop("share_level"),
-            metadata=metadata,
+            metadata=service_data.pop("metadata"),
             figure_names=service_data.pop("figure_names"),
             notes=service_data.pop("notes"),
             **service_data,

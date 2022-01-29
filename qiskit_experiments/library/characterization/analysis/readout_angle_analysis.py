@@ -16,7 +16,7 @@ Readout Angle Analysis class.
 from typing import List, Optional
 import numpy as np
 
-from qiskit_experiments.framework import BaseAnalysis, AnalysisResultData, Options
+from qiskit_experiments.framework import BaseAnalysis, AnalysisResult, Options
 from qiskit_experiments.framework.matplotlib import get_non_gui_ax
 
 
@@ -59,7 +59,7 @@ class ReadoutAngleAnalysis(BaseAnalysis):
         extra_results["readout_radius_1"] = radii[1]
 
         analysis_results = [
-            AnalysisResultData(name="readout_angle", value=angle, extra=extra_results)
+            AnalysisResult(name="readout_angle", value=angle, extra=extra_results)
         ]
 
         if self.options.plot:

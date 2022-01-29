@@ -20,7 +20,7 @@ from qiskit.result import LocalReadoutMitigator
 from qiskit.result import marginal_counts
 from qiskit_experiments.framework import ExperimentData
 from qiskit_experiments.framework.matplotlib import get_non_gui_ax
-from qiskit_experiments.framework import BaseAnalysis, AnalysisResultData, Options
+from qiskit_experiments.framework import BaseAnalysis, AnalysisResult, Options
 
 
 class CorrelatedMitigationAnalysis(BaseAnalysis):
@@ -30,13 +30,13 @@ class CorrelatedMitigationAnalysis(BaseAnalysis):
 
     def _run_analysis(
         self, experiment_data: ExperimentData, **options
-    ) -> Tuple[List[AnalysisResultData], List["matplotlib.figure.Figure"]]:
+    ) -> Tuple[List[AnalysisResult], List["matplotlib.figure.Figure"]]:
         data = experiment_data.data()
         qubits = experiment_data.metadata["physical_qubits"]
         labels = [datum["metadata"]["label"] for datum in data]
         matrix = self._generate_matrix(data, labels)
         result_mitigator = CorrelatedReadoutMitigator(matrix, qubits=qubits)
-        analysis_results = [AnalysisResultData("Correlated Readout Mitigator", result_mitigator)]
+        analysis_results = [AnalysisResult("Correlated Readout Mitigator", result_mitigator)]
         ax = options.get("ax", None)
         figures = [self._plot_calibration(matrix, labels, ax)]
         return analysis_results, figures
@@ -106,12 +106,12 @@ class LocalMitigationAnalysis(BaseAnalysis):
 
     def _run_analysis(
         self, experiment_data: ExperimentData
-    ) -> Tuple[List[AnalysisResultData], List["matplotlib.figure.Figure"]]:
+    ) -> Tuple[List[AnalysisResult], List["matplotlib.figure.Figure"]]:
         data = experiment_data.data()
         qubits = experiment_data.metadata["physical_qubits"]
         matrices = self._generate_matrices(data)
         result_mitigator = LocalReadoutMitigator(matrices, qubits=qubits)
-        analysis_results = [AnalysisResultData("Local Readout Mitigator", result_mitigator)]
+        analysis_results = [AnalysisResult("Local Readout Mitigator", result_mitigator)]
         if self.options.plot:
             figure = assignment_matrix_visualization(
                 result_mitigator.assignment_matrix(), ax=self.options.ax

@@ -12,6 +12,7 @@
 
 """Device component classes."""
 
+from typing import Dict, Any
 from abc import ABC, abstractmethod
 
 
@@ -35,6 +36,15 @@ class Qubit(DeviceComponent):
     def __str__(self):
         return f"Q{self._index}"
 
+    def __json_encode__(self):
+        """Convert to format that can be JSON serialized."""
+        return {"index": self._index}
+
+    @classmethod
+    def __json_decode__(cls, value: Dict[str, Any]) -> "Qubit":
+        """Load from JSON compatible format."""
+        return cls(**value)
+
 
 class Resonator(DeviceComponent):
     """Class representing a resonator device component."""
@@ -45,6 +55,15 @@ class Resonator(DeviceComponent):
     def __str__(self):
         return f"R{self._index}"
 
+    def __json_encode__(self):
+        """Convert to format that can be JSON serialized."""
+        return {"index": self._index}
+
+    @classmethod
+    def __json_decode__(cls, value: Dict[str, Any]) -> "Resonator":
+        """Load from JSON compatible format."""
+        return cls(**value)
+
 
 class UnknownComponent(DeviceComponent):
     """Class representing unknown device component."""
@@ -54,6 +73,15 @@ class UnknownComponent(DeviceComponent):
 
     def __str__(self):
         return self._component
+
+    def __json_encode__(self):
+        """Convert to format that can be JSON serialized."""
+        return {"component": self._component}
+
+    @classmethod
+    def __json_decode__(cls, value: Dict[str, Any]) -> "UnknownComponent":
+        """Load from JSON compatible format."""
+        return cls(**value)
 
 
 def to_component(string: str) -> DeviceComponent:

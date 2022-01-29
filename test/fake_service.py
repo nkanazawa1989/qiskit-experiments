@@ -12,6 +12,7 @@
 
 """Fake service class for tests."""
 
+from collections import defaultdict
 from typing import Optional, List, Dict, Type, Any, Union, Tuple
 import copy
 import json
@@ -30,7 +31,9 @@ class FakeService(DatabaseServiceV1):
     """
 
     def __init__(self):
-        self.database = {}
+        self.experiment_data = dict()
+        self.analysis_data = dict()
+        self.id_map = defaultdict(list)
 
     def create_experiment(
         self,
@@ -66,7 +69,7 @@ class FakeService(DatabaseServiceV1):
             Experiment ID.
         """
 
-        self.database[experiment_id] = {
+        self.experiment_data[experiment_id] = {
             "experiment_type": experiment_type,
             "experiment_id": experiment_id,
             "parent_id": parent_id,
@@ -116,7 +119,7 @@ class FakeService(DatabaseServiceV1):
             A dictionary containing the retrieved experiment data.
         """
 
-        db_entry = copy.deepcopy(self.database[experiment_id])
+        db_entry = copy.deepcopy(self.experiment_data[experiment_id])
         db_entry["backend"] = FakeBackend()
         return db_entry
 
@@ -150,7 +153,7 @@ class FakeService(DatabaseServiceV1):
         json_encoder: Type[json.JSONEncoder] = json.JSONEncoder,
         **kwargs: Any,
     ) -> str:
-        self.database[experiment_id]["analysis"][result_id] = {
+        data_dict = {
             "result_data": result_data,
             "result_id": result_id,
             "result_type": result_type,
@@ -161,6 +164,9 @@ class FakeService(DatabaseServiceV1):
             "tags": tags,
             "service": self,
         }
+        data_json = json.dumps(data_dict, cls=json_encoder)
+        self.analysis_data[result_id] = data_json
+        self.id_map[experiment_id].append(result_id)
 
         return result_id
 
@@ -178,7 +184,7 @@ class FakeService(DatabaseServiceV1):
     def analysis_result(
         self, result_id: str, json_decoder: Type[json.JSONDecoder] = json.JSONDecoder
     ) -> Dict:
-        raise Exception("not implemented")
+        return json.loads(self.analysis_data[result_id], cls=json_decoder)
 
     def analysis_results(
         self,
@@ -194,7 +200,12 @@ class FakeService(DatabaseServiceV1):
         tags_operator: Optional[str] = "OR",
         **filters: Any,
     ) -> List[Dict]:
-        return self.database[experiment_id]["analysis"].values()
+        # this only implements filtering for experiment id which is minimum requirement for test
+        results = []
+        for res_id in self.id_map[experiment_id]:
+            results.append(self.analysis_result(res_id, json_decoder))
+
+        return results
 
     def delete_analysis_result(self, result_id: str) -> None:
         raise Exception("not implemented")

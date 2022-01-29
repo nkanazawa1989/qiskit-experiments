@@ -203,7 +203,7 @@ class DbAnalysisResultV1(DbAnalysisResult):
 
     def copy(self) -> "DbAnalysisResultV1":
         """Return a copy of the result with a new result ID"""
-        return DbAnalysisResultV1(
+        return self.__class__(
             name=self.name,
             value=self.value,
             device_components=self.device_components,
