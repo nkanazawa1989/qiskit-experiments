@@ -172,6 +172,7 @@ class TestCrossResonanceHamiltonian(QiskitExperimentsTestCase):
             qubits=(0, 1),
             flat_top_widths=[1000],
             amp=0.1,
+            amp_t=0.05,
             sigma=64,
             risefall=2,
         )
@@ -189,7 +190,15 @@ class TestCrossResonanceHamiltonian(QiskitExperimentsTestCase):
                 ),
                 pulse.ControlChannel(0),
             )
-            pulse.delay(nearlest_16, pulse.DriveChannel(0))
+            pulse.play(
+                pulse.GaussianSquare(
+                    nearlest_16,
+                    amp=0.05,
+                    sigma=64,
+                    width=1000,
+                ),
+                pulse.DriveChannel(0),
+            )
             pulse.delay(nearlest_16, pulse.DriveChannel(1))
 
         cr_gate = circuit.Gate("cr_gate", num_qubits=2, params=[1000])

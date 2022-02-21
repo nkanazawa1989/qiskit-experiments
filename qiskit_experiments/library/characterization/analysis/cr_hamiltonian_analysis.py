@@ -111,6 +111,8 @@ class TomographyElementAnalysis(curve.CurveAnalysis):
         qiskit_experiments.library.characterization.CrossResonanceHamiltonian
 
     """
+    __fixed_parameters__ = ["t_off"]
+
     __series__ = [
         curve.SeriesDef(
             name="cr_tomo_x",
@@ -153,6 +155,7 @@ class TomographyElementAnalysis(curve.CurveAnalysis):
         default_options.ylabel = "<X(t)>,<Y(t)>,<Z(t)>"
         default_options.xval_unit = "s"
         default_options.ylim = (-1, 1)
+        default_options.t_off = 0
 
         return default_options
 
@@ -167,7 +170,7 @@ class TomographyElementAnalysis(curve.CurveAnalysis):
         Returns:
             List of fit options that are passed to the fitter function.
         """
-        user_opt.bounds.set_if_empty(t_off=(0, np.inf), b=(-1, 1))
+        user_opt.bounds.set_if_empty(b=(-1, 1))
         user_opt.p0.set_if_empty(b=1e-9)
 
         x_data = self._data(series_name=f"cr_tomo_x")

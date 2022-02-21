@@ -16,6 +16,7 @@ Cross resonance Hamiltonian tomography.
 from typing import List, Tuple, Iterable, Dict, Optional
 
 import numpy as np
+import collections
 import itertools
 from qiskit import pulse, circuit, QuantumCircuit
 from qiskit.exceptions import QiskitError
@@ -53,9 +54,6 @@ class TomographyElement(BaseExperiment):
             xval_offset (float): Initial guess of xvalue offset due to
                 rising and falling pulse edges. This should be provided by the
                 root experiment, since thie experiment is agnostic to the pulse shape.
-            t_risefall (float): Actual duration of pulse rising and falling edges.
-                This should be provided by the root experiment,
-                since thie experiment is agnostic to the pulse shape.
             dt (float): Time resoluton of the system. This parameter is
                 automatically set when backend is provided.
             granularity (int): Constaints of pulse data chunk size. This parameter is
@@ -65,7 +63,6 @@ class TomographyElement(BaseExperiment):
         options.durations = None
         options.pulse_parameters = dict()
         options.xval_offset = 0
-        options.t_risefall = 0
         options.dt = 1
         options.granularity = 1
         options.cr_channel = 0
@@ -108,10 +105,10 @@ class TomographyElement(BaseExperiment):
         """
         super().set_experiment_options(**fields)
 
-        # Set initial guess of xval offset from the given pulse shapes
+        # Set xval offset computed from the given pulse shapes
         xval_offset = self.experiment_options.xval_offset
         dt = self.experiment_options.dt
-        self.analysis.set_options(p0={"t_off": xval_offset * dt})
+        self.analysis.set_options(t_off=xval_offset * dt)
 
     def circuits(self) -> List[QuantumCircuit]:
         opt = self.experiment_options
@@ -265,14 +262,14 @@ class CrossResonanceHamiltonian(BatchExperiment):
     # Fully parametrize CR pulse. This is because parameters can be updated at anytime
     # through experiment options, but CR schedule defined in the batch experiment
     # is immediately passed to the component experiments at the class instantiation.
-    __parameters = {
-        "amp": circuit.Parameter("amp"),
-        "amp_t": circuit.Parameter("amp_t"),
-        "sigma": circuit.Parameter("sigma"),
-        "risefall": circuit.Parameter("risefall"),
-        "duration": circuit.Parameter("duration"),
-        "cr_channel": circuit.Parameter("cr_channel"),
-    }
+    __parameters = collections.OrderedDict(
+        amp=circuit.Parameter("amp"),
+        amp_t=circuit.Parameter("amp_t"),
+        sigma=circuit.Parameter("sigma"),
+        risefall=circuit.Parameter("risefall"),
+        duration=circuit.Parameter("duration"),
+        cr_channel=circuit.Parameter("cr_channel"),
+    )
 
     def __init__(
         self,
@@ -416,7 +413,6 @@ class CrossResonanceHamiltonian(BatchExperiment):
             exp.set_experiment_options(
                 durations=cr_durations,
                 pulse_parameters=pulse_parameters,
-                t_risefall=t_risefall,
                 xval_offset=edge_duration,
             )
 
