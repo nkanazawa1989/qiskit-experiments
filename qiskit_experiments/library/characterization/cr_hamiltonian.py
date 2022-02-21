@@ -16,14 +16,153 @@ Cross resonance Hamiltonian tomography.
 from typing import List, Tuple, Iterable, Dict, Optional
 
 import numpy as np
+import itertools
 from qiskit import pulse, circuit, QuantumCircuit
 from qiskit.exceptions import QiskitError
 from qiskit.providers import Backend
-from qiskit_experiments.framework import BaseExperiment, Options
-from qiskit_experiments.library.characterization.analysis import CrossResonanceHamiltonianAnalysis
+from qiskit.utils import optionals
+from qiskit_experiments.framework import BaseExperiment, BatchExperiment, Options
+from qiskit_experiments.curve_analysis import ParameterRepr
+
+from .analysis.cr_hamiltonian_analysis import (
+    TomographyElementAnalysis,
+    CrossResonanceHamiltonianAnalysis,
+)
 
 
-class CrossResonanceHamiltonian(BaseExperiment):
+class TomographyElement(BaseExperiment):
+
+    def __init__(
+        self,
+        qubits: Tuple[int, int],
+        tomography_circuit: QuantumCircuit,
+        backend: Optional[Backend] = None,
+    ):
+        super().__init__(qubits=qubits, backend=backend, analysis=TomographyElementAnalysis())
+        self.tomography_circuit = tomography_circuit
+        self.param_map_r = {param.name: param for param in tomography_circuit.parameters}
+
+    @classmethod
+    def _default_experiment_options(cls) -> Options:
+        """Default experiment options.
+
+        Experiment Options:
+            pulse_parameters (Dict[str, float]): Pulse parameters keyed on the
+                name of parameters attached to the ``tomography_circuit``.
+            durations (Sequence[int]): ######
+            xval_offset (float): Initial guess of xvalue offset due to
+                rising and falling pulse edges. This should be provided by the
+                root experiment, since thie experiment is agnostic to the pulse shape.
+            t_risefall (float): Actual duration of pulse rising and falling edges.
+                This should be provided by the root experiment,
+                since thie experiment is agnostic to the pulse shape.
+            dt (float): Time resoluton of the system. This parameter is
+                automatically set when backend is provided.
+            granularity (int): Constaints of pulse data chunk size. This parameter is
+                automatically set when backend is provided.
+        """
+        options = super()._default_experiment_options()
+        options.durations = None
+        options.pulse_parameters = dict()
+        options.xval_offset = 0
+        options.t_risefall = 0
+        options.dt = 1
+        options.granularity = 1
+        options.cr_channel = 0
+
+        return options
+
+    def _set_backend(self, backend):
+        """Extract dt and granularity from the backend."""
+        super()._set_backend(backend)
+        configuration = backend.configuration()
+
+        try:
+            dt_factor = configuration.dt
+        except AttributeError as ex:
+            raise AttributeError(
+                "Backend configuration does not provide system time resolution dt."
+            ) from ex
+
+        try:
+            cr_channels = configuration.control(self.physical_qubits)
+            index = cr_channels[0].index
+        except AttributeError as ex:
+            raise AttributeError(
+                "Backend configuration does not provide control channel mapping."
+            ) from ex
+
+        try:
+            granularity = configuration.timing_constraints["granularity"]
+        except (AttributeError, KeyError):
+            granularity = 1
+
+        # Update experiment options
+        self.set_experiment_options(dt=dt_factor, granularity=granularity, cr_channel=index)
+
+    def set_experiment_options(self, **fields):
+        """Set the experiment options.
+
+        Args:
+            fields: The fields to update the options
+        """
+        super().set_experiment_options(**fields)
+
+        # Set initial guess of xval offset from the given pulse shapes
+        xval_offset = self.experiment_options.xval_offset
+        dt = self.experiment_options.dt
+        self.analysis.set_options(p0={"t_off": xval_offset * dt})
+
+    def circuits(self) -> List[QuantumCircuit]:
+        opt = self.experiment_options
+
+        tomo_circuits = []
+        for meas_basis in ("x", "y", "z"):
+            tomo_circ = QuantumCircuit(2, 1)
+
+            tomo_circ.compose(
+                other=self.tomography_circuit,
+                qubits=[0, 1],
+                inplace=True,
+            )
+
+            # measure
+            if meas_basis == "x":
+                tomo_circ.h(1)
+            elif meas_basis == "y":
+                tomo_circ.sdg(1)
+                tomo_circ.h(1)
+            tomo_circ.measure(1, 0)
+
+            tomo_circ.metadata = {
+                "experiment_type": self.experiment_type,
+                "qubits": self.physical_qubits,
+                "meas_basis": meas_basis,
+            }
+            tomo_circuits.append(tomo_circ)
+
+        pulse_shape = {
+            pobj: opt.pulse_parameters.get(pname, None) for pname, pobj in self.param_map_r.items()
+        }
+        pulse_shape[self.param_map_r["cr_channel"]] = opt.cr_channel
+
+        experiment_circs = []
+        for duration in opt.durations:
+            effective_duration = opt.granularity * int(duration / opt.granularity)
+
+            params = pulse_shape.copy()
+            params[self.param_map_r["duration"]] = effective_duration
+
+            for tomo_circ in tomo_circuits:
+                tomo_circ_t = tomo_circ.assign_parameters(params)
+                tomo_circ_t.metadata["xval"] = effective_duration * opt.dt  # in units of sec
+                tomo_circ_t.metadata["pulse_shape"] = {p.name: v for p, v in params.items()}
+                experiment_circs.append(tomo_circ_t)
+
+        return experiment_circs
+
+
+class CrossResonanceHamiltonian(BatchExperiment):
     r"""Cross resonance Hamiltonian tomography experiment.
 
     # section: overview
@@ -121,9 +260,19 @@ class CrossResonanceHamiltonian(BaseExperiment):
         .. ref_website:: Qiskit Textbook 6.7,
             https://qiskit.org/textbook/ch-quantum-hardware/hamiltonian-tomography.html
     """
+    __n_echos = 1
 
-    # Number of CR pulses. The flat top duration per pulse is divided by this number.
-    __n_cr_pulses__ = 1
+    # Fully parametrize CR pulse. This is because parameters can be updated at anytime
+    # through experiment options, but CR schedule defined in the batch experiment
+    # is immediately passed to the component experiments at the class instantiation.
+    __parameters = {
+        "amp": circuit.Parameter("amp"),
+        "amp_t": circuit.Parameter("amp_t"),
+        "sigma": circuit.Parameter("sigma"),
+        "risefall": circuit.Parameter("risefall"),
+        "duration": circuit.Parameter("duration"),
+        "cr_channel": circuit.Parameter("cr_channel"),
+    }
 
     def __init__(
         self,
@@ -147,13 +296,71 @@ class CrossResonanceHamiltonian(BaseExperiment):
         Raises:
             QiskitError: When ``qubits`` length is not 2.
         """
-        super().__init__(qubits, analysis=CrossResonanceHamiltonianAnalysis(), backend=backend)
-
         if len(qubits) != 2:
             raise QiskitError(
                 "Length of qubits is not 2. Please provide index for control and target qubit."
             )
 
+        cal_def = self._default_cr_schedule(*qubits)
+
+        pulse_gate = circuit.Gate(
+            "cr_gate",
+            num_qubits=2,
+            params=cal_def.parameters,
+        )
+
+        cr_circuit = self._default_cr_sequence(pulse_gate)
+
+        # Control state = 0
+        cr_circuit0 = QuantumCircuit(2)
+        cr_circuit0.compose(cr_circuit, inplace=True)
+        cr_circuit0.add_calibration(
+            gate=pulse_gate,
+            qubits=qubits,
+            schedule=cal_def,
+            params=cal_def.parameters,
+        )
+        exp0 = TomographyElement(
+            qubits=qubits,
+            tomography_circuit=cr_circuit0,
+            backend=backend,
+        )
+        exp0.analysis.set_options(
+            result_parameters=[
+                ParameterRepr("px", "cr_tomo_px0", "rad/s"),
+                ParameterRepr("py", "cr_tomo_py0", "rad/s"),
+                ParameterRepr("pz", "cr_tomo_pz0", "rad/s"),
+            ]
+        )
+
+        # Control state = 1
+        cr_circuit1 = QuantumCircuit(2)
+        cr_circuit1.x(0)
+        cr_circuit1.compose(cr_circuit, inplace=True)
+        cr_circuit1.add_calibration(
+            gate=pulse_gate,
+            qubits=qubits,
+            schedule=cal_def,
+            params=cal_def.parameters,
+        )
+        exp1 = TomographyElement(
+            qubits=qubits,
+            tomography_circuit=cr_circuit1,
+            backend=backend,
+        )
+        exp1.analysis.set_options(
+            result_parameters=[
+                ParameterRepr("px", "cr_tomo_px1", "rad/s"),
+                ParameterRepr("py", "cr_tomo_py1", "rad/s"),
+                ParameterRepr("pz", "cr_tomo_pz1", "rad/s"),
+            ]
+        )
+
+        super().__init__(
+            experiments=[exp0, exp1],
+            backend=backend,
+        )
+        self.analysis = CrossResonanceHamiltonianAnalysis(analyses=[exp0.analysis, exp1.analysis])
         self.set_experiment_options(flat_top_widths=flat_top_widths, **kwargs)
 
     @classmethod
@@ -179,160 +386,103 @@ class CrossResonanceHamiltonian(BaseExperiment):
 
         return options
 
-    def _build_cr_circuit(
-        self,
-        pulse_gate: circuit.Gate,
-    ) -> QuantumCircuit:
-        """Single tone cross resonance.
+    def set_experiment_options(self, **fields):
+        """Set the experiment options.
 
         Args:
-            pulse_gate: A pulse gate to represent a single cross resonance pulse.
+            fields: The fields to update the options
+        """
+        super().set_experiment_options(**fields)
+
+        # Override component experiment configurations
+        opt = self.experiment_options
+
+        pulse_parameters = {
+            "amp": opt.amp,
+            "amp_t": opt.amp_t,
+            "sigma": opt.sigma,
+            "risefall": opt.risefall,
+        }
+
+        # Entire CR pulse duration (in dt)
+        t_risefall = 2 * opt.sigma * opt.risefall
+        cr_durations = np.asarray(opt.flat_top_widths, dtype=float) / self.__n_echos + t_risefall
+
+        # Effective length of Gaussian rising falling edges for fit guess (in dt).
+        edge_duration = np.sqrt(2 * np.pi) * opt.sigma * self.__n_echos
+
+        for exp in self.component_experiment():
+            # Copy pulse configurations to component experiments
+            exp.set_experiment_options(
+                durations=cr_durations,
+                pulse_parameters=pulse_parameters,
+                t_risefall=t_risefall,
+                xval_offset=edge_duration,
+            )
+
+    def set_transpile_options(self, **fields):
+        """Set the transpiler options for :meth:`run` method.
+
+        Args:
+            fields: The fields to update the options
+        """
+        super().set_transpile_options(fields)
+
+        for exp in self.component_experiment():
+            exp.set_transpile_options(fields)
+
+    @classmethod
+    def _default_cr_sequence(cls, pulse_gate: circuit.Gate) -> circuit.QuantumCircuit:
+        """Circuit level representation of cross resonance sequence.
+
+        Args:
+            pulse_gate: Gate definition of the cross resonance.
 
         Returns:
-            A circuit definition for the cross resonance pulse to measure.
+            QuantumCircuit representation of cross resonance sequence.
         """
-        cr_circuit = QuantumCircuit(2)
+        cr_circuit = circuit.QuantumCircuit(2)
         cr_circuit.append(pulse_gate, [0, 1])
 
         return cr_circuit
 
-    def _build_cr_schedule(
-        self,
-        backend: Backend,
-        flat_top_width: float,
-        sigma: float,
-    ) -> pulse.ScheduleBlock:
-        """GaussianSquared cross resonance pulse.
+    @classmethod
+    def _default_cr_schedule(cls, control_index, target_index) -> pulse.Schedule:
+        """Pulse level representation of single cross resonance gate.
 
         Args:
-            backend: The target backend.
-            flat_top_width: Total length of flat top part of the pulse in units of dt.
-            sigma: Sigma of Gaussian edges in units of dt.
+            control_index: Index of control qubit.
+            target_index: Index of target qubit.
 
         Returns:
-            A schedule definition for the cross resonance pulse to measure.
+            Pulse schedule of cross resonance.
         """
-        opt = self.experiment_options
-
-        # Compute valid integer duration
-        cr_duration = round_pulse_duration(
-            backend=backend, duration=flat_top_width + 2 * sigma * opt.risefall
-        )
-
-        with pulse.build(backend, default_alignment="left", name="cr") as cross_resonance:
+        with pulse.build(default_alignment="left", name="cr") as cal_def:
 
             # add cross resonance tone
             pulse.play(
                 pulse.GaussianSquare(
-                    duration=cr_duration,
-                    amp=opt.amp,
-                    sigma=sigma,
-                    width=flat_top_width,
+                    duration=cls.__parameters["duration"],
+                    amp=cls.__parameters["amp"],
+                    sigma=cls.__parameters["sigma"],
+                    risefall_sigma_ratio=cls.__parameters["risefall"],
                 ),
-                pulse.control_channels(*self.physical_qubits)[0],
+                pulse.ControlChannel(cls.__parameters["cr_channel"]),
             )
-            # add cancellation tone
-            if not np.isclose(opt.amp_t, 0.0):
-                pulse.play(
-                    pulse.GaussianSquare(
-                        duration=cr_duration,
-                        amp=opt.amp_t,
-                        sigma=sigma,
-                        width=flat_top_width,
-                    ),
-                    pulse.drive_channel(self.physical_qubits[1]),
-                )
-            else:
-                pulse.delay(cr_duration, pulse.drive_channel(self.physical_qubits[1]))
+            pulse.play(
+                pulse.GaussianSquare(
+                    duration=cls.__parameters["duration"],
+                    amp=cls.__parameters["amp"],
+                    sigma=cls.__parameters["sigma"],
+                    risefall_sigma_ratio=cls.__parameters["risefall"],
+                ),
+                pulse.DriveChannel(target_index),
+            )
 
             # place holder for empty drive channels. this is necessary due to known pulse gate bug.
-            pulse.delay(cr_duration, pulse.drive_channel(self.physical_qubits[0]))
+            pulse.delay(cls.__parameters["duration"], pulse.DriveChannel(control_index))
 
-        return cross_resonance
-
-    def circuits(self) -> List[QuantumCircuit]:
-        """Return a list of experiment circuits.
-
-        Returns:
-            A list of :class:`QuantumCircuit`.
-
-        Raises:
-            AttributeError: When the backend doesn't report the time resolution of waveforms.
-        """
-        opt = self.experiment_options
-
-        try:
-            dt_factor = self.backend.configuration().dt
-        except AttributeError as ex:
-            raise AttributeError("Backend configuration does not provide time resolution.") from ex
-
-        # Parametrized duration cannot be used because total duration is computed
-        # on the fly with granularity validation. This validation requires
-        # duration value that is not a parameter expression.
-
-        # Note that this experiment scans flat top width rather than total duration.
-        expr_circs = list()
-        for flat_top_width in np.asarray(opt.flat_top_widths, dtype=float):
-
-            cr_gate = circuit.Gate(
-                "cr_gate",
-                num_qubits=2,
-                params=[flat_top_width / self.__n_cr_pulses__],
-            )
-
-            for control_state in (0, 1):
-                for meas_basis in ("x", "y", "z"):
-                    tomo_circ = QuantumCircuit(2, 1)
-
-                    # state prep
-                    if control_state:
-                        tomo_circ.x(0)
-
-                    # add cross resonance
-                    tomo_circ.compose(
-                        other=self._build_cr_circuit(cr_gate),
-                        qubits=[0, 1],
-                        inplace=True,
-                    )
-
-                    # measure
-                    if meas_basis == "x":
-                        tomo_circ.h(1)
-                    elif meas_basis == "y":
-                        tomo_circ.sdg(1)
-                        tomo_circ.h(1)
-                    tomo_circ.measure(1, 0)
-
-                    # add metadata
-                    tomo_circ.metadata = {
-                        "experiment_type": self.experiment_type,
-                        "qubits": self.physical_qubits,
-                        "xval": flat_top_width * dt_factor,  # in units of sec
-                        "control_state": control_state,
-                        "meas_basis": meas_basis,
-                    }
-
-                    # Create schedule and add it to the circuit.
-                    # The flat top width and sigma are in units of dt
-                    # width is divided by number of tones to keep total duration consistent
-                    tomo_circ.add_calibration(
-                        gate=cr_gate,
-                        qubits=self.physical_qubits,
-                        schedule=self._build_cr_schedule(
-                            backend=self.backend,
-                            flat_top_width=flat_top_width / self.__n_cr_pulses__,
-                            sigma=opt.sigma,
-                        ),
-                    )
-
-                    expr_circs.append(tomo_circ)
-
-        return expr_circs
-
-    def _additional_metadata(self) -> Dict[str, any]:
-        """Attach number of pulses to construct time offset initial guess in the fitter."""
-
-        return {"n_cr_pulses": self.__n_cr_pulses__}
+        return cal_def
 
 
 class EchoedCrossResonanceHamiltonian(CrossResonanceHamiltonian):
@@ -365,21 +515,22 @@ class EchoedCrossResonanceHamiltonian(CrossResonanceHamiltonian):
     # section: reference
         .. ref_arxiv:: 1 2007.02925
 
+    # see_also:
+        qiskit_experiments.library.characterization.CrossResonanceHamiltonian
+
     """
 
-    __n_cr_pulses__ = 2
+    __n_echos = 2
 
-    def _build_cr_circuit(
-        self,
-        pulse_gate: circuit.Gate,
-    ) -> QuantumCircuit:
-        """Build the echoed cross-resonance circuit out of two single cross-resonance tones.
+    @classmethod
+    def _default_cr_sequence(cls, pulse_gate: circuit.Gate) -> circuit.QuantumCircuit:
+        """Circuit level representation of cross resonance sequence.
 
         Args:
-            pulse_gate: A pulse gate to represent a single cross resonance pulse.
+            pulse_gate: Gate definition of the cross resonance.
 
         Returns:
-            A circuit definition for the cross resonance pulse to measure.
+            QuantumCircuit representation of cross resonance sequence.
         """
         cr_circuit = QuantumCircuit(2)
         cr_circuit.append(pulse_gate, [0, 1])
@@ -389,21 +540,3 @@ class EchoedCrossResonanceHamiltonian(CrossResonanceHamiltonian):
         cr_circuit.rz(-np.pi, 1)
 
         return cr_circuit
-
-
-def round_pulse_duration(backend: Backend, duration: float) -> int:
-    """Find the best pulse duration that meets timing constraints of the backend.
-
-    Args:
-        backend: Target backend to play pulses.
-        duration: Duration of pulse to be formatted.
-
-    Returns:
-        Valid integer pulse duration that meets timing constraints of the backend.
-    """
-    # TODO this can be moved to some common utils
-
-    timing_constraints = getattr(backend.configuration(), "timing_constraints", dict())
-    granularity = int(timing_constraints.get("granularity", 1))
-
-    return granularity * int(duration / granularity)

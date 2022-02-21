@@ -53,16 +53,23 @@ class CrossResonanceHamiltonianBackend(FakeBackend):
             b: Offset term.
             seed: Seed of random number generator used to generate count data.
         """
-        self.fit_func_args = {
-            "t_off": t_off,
-            "px0": 2 * np.pi * (ix + zx),
-            "px1": 2 * np.pi * (ix - zx),
-            "py0": 2 * np.pi * (iy + zy),
-            "py1": 2 * np.pi * (iy - zy),
-            "pz0": 2 * np.pi * (iz + zz),
-            "pz1": 2 * np.pi * (iz - zz),
-            "b": b,
-        }
+        # composite experiment
+        self.fit_func_args = [
+            {
+                "t_off": t_off,
+                "px": 2 * np.pi * (ix + zx),
+                "py": 2 * np.pi * (iy + zy),
+                "pz": 2 * np.pi * (iz + zz),
+                "b": b,
+            },
+            {
+                "t_off": t_off,
+                "px": 2 * np.pi * (ix - zx),
+                "py": 2 * np.pi * (iy - zy),
+                "pz": 2 * np.pi * (iz - zz),
+                "b": b,
+            },
+        ]
         self.seed = seed
         configuration = PulseBackendConfiguration(
             backend_name="fake_cr_hamiltonian",
@@ -120,18 +127,18 @@ class CrossResonanceHamiltonianBackend(FakeBackend):
         shots = kwargs.get("shots", 1024)
         rng = np.random.default_rng(seed=self.seed)
 
-        series_defs = cr_hamiltonian_analysis.CrossResonanceHamiltonianAnalysis.__series__
-        filter_kwargs_list = [sdef.filter_kwargs for sdef in series_defs]
+        series_defs = cr_hamiltonian_analysis.TomographyElementAnalysis.__series__
+        filter_kwargs_list = [sdef.filter_kwargs["meas_basis"] for sdef in series_defs]
 
         for test_circ in run_input:
-            metadata = {
-                "control_state": test_circ.metadata["control_state"],
-                "meas_basis": test_circ.metadata["meas_basis"],
-            }
-            curve_ind = filter_kwargs_list.index(metadata)
-            xval = test_circ.metadata["xval"]
+            # composite experiment
+            component_index = test_circ.metadata["composite_index"][0]
+            component_metadata = test_circ.metadata["composite_metadata"][0]
 
-            expv = series_defs[curve_ind].fit_func(xval, **self.fit_func_args)
+            curve_ind = filter_kwargs_list.index(component_metadata["meas_basis"])
+            xval = component_metadata["xval"]
+
+            expv = series_defs[curve_ind].fit_func(xval, **self.fit_func_args[component_index])
             popl = 0.5 * (1 - expv)
             counts = rng.multinomial(shots, [1 - popl, popl])
             results.append(
@@ -254,10 +261,10 @@ class TestCrossResonanceHamiltonian(QiskitExperimentsTestCase):
         # These values are computed from other analysis results in post hook.
         # Thus at least one of these values should be round-trip tested.
         res_ix = exp_data.analysis_results("omega_ix")
-        self.assertAlmostEqual(res_ix.value.n, ix, delta=2e4)
         self.assertRoundTripSerializable(res_ix.value, check_func=self.ufloat_equiv)
         self.assertEqual(res_ix.extra["unit"], "Hz")
 
+        self.assertAlmostEqual(exp_data.analysis_results("omega_ix").value.n, ix, delta=2e4)
         self.assertAlmostEqual(exp_data.analysis_results("omega_iy").value.n, iy, delta=2e4)
         self.assertAlmostEqual(exp_data.analysis_results("omega_iz").value.n, iz, delta=2e4)
         self.assertAlmostEqual(exp_data.analysis_results("omega_zx").value.n, zx, delta=2e4)
