@@ -29,11 +29,12 @@ from qiskit_experiments.framework import BaseAnalysis, AnalysisResultData, Optio
 from qiskit_experiments.data_processing import DataProcessor
 from qiskit_experiments.data_processing.processor_library import get_processor
 from qiskit_experiments.data_processing.exceptions import DataProcessorError
+from qiskit_experiments.warnings import deprecated_function
 
 from .curve_data import CurveData, ParameterRepr, FitOptions, CurveFitResult
-from .data_processing import multi_mean_xy_data, data_sort
 from .visualization import MplCurveDrawer, BaseCurveDrawer
 from .utils import convert_lmfit_result
+from .format_data import shot_weighted_average
 
 PARAMS_ENTRY_PREFIX = "@Parameters_"
 DATA_ENTRY_PREFIX = "@Data_"
@@ -128,8 +129,6 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
                 This is ``True`` by default.
             return_fit_parameters (bool): Set ``True`` to return all fit model parameters
                 with details of the fit outcome. Default to ``True``.
-            return_data_points (bool): Set ``True`` to include in the analysis result
-                the formatted data points given to the fitter. Default to ``False``.
             data_processor (Callable): A callback function to format experiment data.
                 This can be a :class:`~qiskit_experiments.data_processing.DataProcessor`
                 instance that defines the `self.__call__` method.
@@ -166,7 +165,6 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
         options.plot_raw_data = False
         options.plot = True
         options.return_fit_parameters = True
-        options.return_data_points = False
         options.data_processor = None
         options.normalization = False
         options.x_key = "xval"
@@ -218,6 +216,14 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
             )
             del fields["curve_fitter"]
 
+        if "return_data_points" in fields:
+            warnings.warn(
+                "Option 'return_data_points' is removed. Now raw experiment data is "
+                "stored as a part of @Parameters entry which is a 'CurveFitResult' dataclass."
+                "CurveFitResult.data provides a full observed data in dataframe format."
+            )
+            del fields["return_data_points"]
+
         # pylint: disable=no-member
         draw_options = set(self.drawer.options.__dict__.keys()) | {"style"}
         deprecated = draw_options & fields.keys()
@@ -245,7 +251,7 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
     def _generate_fit_guesses(
         self,
         user_opt: FitOptions,
-        curve_data: CurveData,  # pylint: disable=unused-argument
+        curve_data: pd.DataFrame,  # pylint: disable=unused-argument
     ) -> Union[FitOptions, List[FitOptions]]:
         """Create algorithmic guess with analysis options and curve data.
 
@@ -268,26 +274,15 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
             curve_data: Processed dataset created from experiment results.
 
         Returns:
-            Formatted data.
+            Formatted data frame.
         """
-        # take average over the same x value by keeping sigma
-        data_allocation, xdata, ydata, sigma, shots = multi_mean_xy_data(
-            series=curve_data.data_allocation,
-            xdata=curve_data.x,
-            ydata=curve_data.y,
-            sigma=curve_data.y_err,
-            shots=curve_data.shots,
-            method="shots_weighted",
-        )
+        # This returns DataFrameGroupBy object.
+        # Sort dataframe with model and x.
+        # Take average over the same x values in the same group.
+        grouped_by_model = curve_data.groupby(["model", "x"], as_index=False)
+        averaged_df = grouped_by_model.apply(shot_weighted_average)
 
-        return CurveData(
-            x=xdata,
-            y=ydata,
-            y_err=sigma,
-            shots=shots,
-            data_allocation=data_allocation,
-            labels=curve_data.labels,
-        )
+        return averaged_df
 
     def _evaluate_quality(
         self,
@@ -339,7 +334,7 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
             {
                 "x": xdata,
                 "y": unp.nominal_values(ydata),
-                "yerr": unp.std_devs(ydata),
+                "y_err": unp.std_devs(ydata),
                 "shots": shots,
                 "model": [pd.NA] * num_data,
                 **extra
@@ -350,7 +345,7 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
             # Tag data series with model name
             for model in models:
                 try:
-                    conds = [f"{k} == '{v}'" for k, v in model.opts["data_sort_key"].items()]
+                    conds = [f"{k} == {repr(v)}" for k, v in model.opts["data_sort_key"].items()]
                 except KeyError as ex:
                     raise DataProcessorError(
                         f"Data sort key for model '{model._name}' is not defined."
@@ -370,13 +365,13 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
 
     def _run_curve_fit(
         self,
-        curve_data: CurveData,
+        curve_data: pd.DataFrame,
         models: List[Model],
     ) -> CurveFitResult:
         """Perform curve fitting on given data collection and fit models.
 
         Args:
-            curve_data: Formatted data to fit.
+            curve_data: Formatted data frame to fit.
             models: A list of LMFIT models that are used to build a cost function
                 for the LMFIT minimizer.
 
@@ -431,10 +426,12 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
         valid_uncertainty = np.all(np.isfinite(curve_data.y_err))
 
         # Objective function for minimize. This computes composite residuals of sub models.
+        grouped_data = curve_data.groupby("model")
+
         def _objective(_params):
             ys = []
             for model in models:
-                sub_data = curve_data.get_subset_of(model._name)
+                sub_data = grouped_data.get_group(model._name)
                 yi = model._residual(
                     params=_params,
                     data=sub_data.y,
@@ -478,7 +475,7 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
             if new.success and res.redchi > new.redchi:
                 res = new
 
-        return convert_lmfit_result(res, models, curve_data.x, curve_data.y)
+        return convert_lmfit_result(res, models, curve_data)
 
     def _create_analysis_results(
         self,
@@ -525,6 +522,10 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
 
         return outcomes
 
+    @deprecated_function(
+        "0.5",
+        msg="No need to create separate entry for curve data. This is a part of @Parameters entry."
+    )
     def _create_curve_data(
         self,
         curve_data: CurveData,
@@ -541,28 +542,8 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
         Returns:
             List of analysis result data.
         """
-        samples = []
 
-        if not self.options.return_data_points:
-            return samples
-
-        for model in models:
-            sub_data = curve_data.get_subset_of(model._name)
-            raw_datum = AnalysisResultData(
-                name=DATA_ENTRY_PREFIX + self.__class__.__name__,
-                value={
-                    "xdata": sub_data.x,
-                    "ydata": sub_data.y,
-                    "sigma": sub_data.y_err,
-                },
-                extra={
-                    "name": model._name,
-                    **metadata,
-                },
-            )
-            samples.append(raw_datum)
-
-        return samples
+        return []
 
     def _initialize(
         self,

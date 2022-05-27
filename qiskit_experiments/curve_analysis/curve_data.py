@@ -19,6 +19,7 @@ import itertools
 import inspect
 from typing import Any, Dict, Union, List, Tuple, Optional, Iterable, Callable
 
+import pandas as pd
 import numpy as np
 import uncertainties
 from uncertainties.unumpy import uarray
@@ -73,6 +74,7 @@ class SeriesDef:
         object.__setattr__(self, "signature", fitparams)
 
 
+@deprecated_class("0.5", msg="CurveData is replaced with pandas DataFrame.")
 @dataclasses.dataclass(frozen=True)
 class CurveData:
     """A dataclass that manages the multiple arrays comprising the dataset for fitting.
@@ -145,8 +147,7 @@ class CurveFitResult:
         bic: Bayesian information criterion.
         params: Estimated fitting parameters keyed on the parameter names in the fit function.
         var_names: Name of variables, i.e. fixed parameters are excluded from the list.
-        x_data: X values used for the fitting.
-        y_data: Y values used for the fitting.
+        data: Data frame of experiment data used for the fitting.
         covar: Covariance matrix of fitting variables.
         correl: Correlation matrix of fitting variable. This is automatically computed
             from the ``self.covar`` when it is available.
@@ -167,8 +168,7 @@ class CurveFitResult:
     bic: float = None
     params: Dict[str, float] = None
     var_names: List[str] = None
-    x_data: np.ndarray = None
-    y_data: np.ndarray = None
+    data: pd.DataFrame = None
     covar: np.ndarray = None
     correl: np.ndarray = dataclasses.field(init=False, repr=False)
     ufloat_params: Dict[str, uncertainties.UFloat] = dataclasses.field(init=False, repr=False)
@@ -178,14 +178,16 @@ class CurveFitResult:
         self._set_ufloat_params(self.covar)
 
     @property
+    @deprecated_function("0.5", "Use '.data' which returns full dataset.")
     def x_range(self) -> Tuple[float, float]:
         """Range of X values."""
-        return min(self.x_data), max(self.x_data)
+        return min(self.data.x), max(self.data.x)
 
     @property
+    @deprecated_function("0.5", "Use '.data' which returns full dataset.")
     def y_range(self) -> Tuple[float, float]:
         """Range of Y values."""
-        return min(self.y_data), max(self.y_data)
+        return min(self.data.y), max(self.data.y)
 
     @deprecated_function("0.5", "Use '.ufloat_params' which returns a dictionary instead.")
     def fitval(self, key: str) -> uncertainties.UFloat:

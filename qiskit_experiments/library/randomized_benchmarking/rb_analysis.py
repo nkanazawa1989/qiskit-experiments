@@ -16,6 +16,7 @@ import warnings
 from collections import defaultdict
 from typing import Dict, List, Sequence, Tuple, Union, Optional, TYPE_CHECKING
 
+import pandas as pd
 from lmfit.models import ExpressionModel
 from qiskit.exceptions import QiskitError
 
@@ -119,7 +120,7 @@ class RBAnalysis(curve.CurveAnalysis):
     def _generate_fit_guesses(
         self,
         user_opt: curve.FitOptions,
-        curve_data: curve.CurveData,
+        curve_data: pd.DataFrame,
     ) -> Union[curve.FitOptions, List[curve.FitOptions]]:
         """Create algorithmic guess with analysis options and curve data.
 

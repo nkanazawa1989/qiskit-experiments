@@ -14,6 +14,7 @@
 
 from typing import List, Union
 
+import pandas as pd
 import numpy as np
 from lmfit.models import ExpressionModel
 
@@ -102,7 +103,7 @@ class RamseyXYAnalysis(curve.CurveAnalysis):
     def _generate_fit_guesses(
         self,
         user_opt: curve.FitOptions,
-        curve_data: curve.CurveData,
+        curve_data: pd.DataFrame,
     ) -> Union[curve.FitOptions, List[curve.FitOptions]]:
         """Create algorithmic guess with analysis options and curve data.
 
@@ -113,6 +114,14 @@ class RamseyXYAnalysis(curve.CurveAnalysis):
         Returns:
             List of fit options that are passed to the fitter function.
         """
+        grouped_data = curve_data.groupby("model")
+
+        # Need to reset index because we compute sum of two dataset.
+        # .get_group keeps original index, thus the same x values have different index.
+        # Binary operation on values with different index doesn't work.
+        data_x = grouped_data.get_group("X").reset_index()
+        data_y = grouped_data.get_group("Y").reset_index()
+
         max_abs_y, _ = curve.guess.max_height(curve_data.y, absolute=True)
 
         user_opt.bounds.set_if_empty(
@@ -124,8 +133,7 @@ class RamseyXYAnalysis(curve.CurveAnalysis):
 
         # Default guess values
         freq_guesses, base_guesses = [], []
-        for series in ["X", "Y"]:
-            data = curve_data.get_subset_of(series)
+        for data in [data_x, data_y]:
             freq_guesses.append(curve.guess.frequency(data.x, data.y))
             base_guesses.append(curve.guess.constant_sinusoidal_offset(data.y))
 
@@ -133,8 +141,6 @@ class RamseyXYAnalysis(curve.CurveAnalysis):
         user_opt.p0.set_if_empty(base=np.average(base_guesses))
 
         # Guess the exponential decay by combining both curves
-        data_x = curve_data.get_subset_of("X")
-        data_y = curve_data.get_subset_of("Y")
         decay_data = (data_x.y - user_opt.p0["base"]) ** 2 + (data_y.y - user_opt.p0["base"]) ** 2
 
         user_opt.p0.set_if_empty(

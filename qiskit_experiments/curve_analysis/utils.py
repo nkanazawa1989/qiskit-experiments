@@ -14,6 +14,7 @@
 
 from typing import Union, Optional, List, Dict
 
+import pandas as pd
 import numpy as np
 from qiskit.utils import detach_prefix
 from uncertainties import UFloat, wrap as wrap_function
@@ -156,8 +157,7 @@ def analysis_result_to_repr(result: AnalysisResultData) -> str:
 def convert_lmfit_result(
     result: MinimizerResult,
     models: List[Model],
-    xdata: np.ndarray,
-    ydata: np.ndarray,
+    data: pd.DataFrame,
 ) -> CurveFitResult:
     """A helper function to convert LMFIT ``MinimizerResult`` into :class:`.CurveFitResult`.
 
@@ -169,8 +169,7 @@ def convert_lmfit_result(
     Args:
         result: Output from LMFIT ``minimize``.
         models: Model used for the fitting. Function description is extracted.
-        xdata: X values used for the fitting.
-        ydata: Y values used for the fitting.
+        data: Data used for the fitting.
 
     Returns:
         QiskitExperiments :class:`.CurveFitResult` object.
@@ -188,8 +187,7 @@ def convert_lmfit_result(
         return CurveFitResult(
             model_repr=model_descriptions,
             success=False,
-            x_data=xdata,
-            y_data=ydata,
+            data=data,
         )
 
     covar = getattr(result, "covar", None)
@@ -209,8 +207,7 @@ def convert_lmfit_result(
         bic=result.bic,
         params={name: param.value for name, param in result.params.items()},
         var_names=result.var_names,
-        x_data=xdata,
-        y_data=ydata,
+        data=data,
         covar=covar,
     )
 

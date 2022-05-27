@@ -14,6 +14,7 @@ Interleaved RB analysis class.
 """
 from typing import List, Union
 
+import pandas as pd
 import numpy as np
 from lmfit.models import ExpressionModel
 
@@ -123,7 +124,7 @@ class InterleavedRBAnalysis(curve.CurveAnalysis):
     def _generate_fit_guesses(
         self,
         user_opt: curve.FitOptions,
-        curve_data: curve.CurveData,
+        curve_data: pd.DataFrame,
     ) -> Union[curve.FitOptions, List[curve.FitOptions]]:
         """Create algorithmic guess with analysis options and curve data.
 
@@ -134,6 +135,8 @@ class InterleavedRBAnalysis(curve.CurveAnalysis):
         Returns:
             List of fit options that are passed to the fitter function.
         """
+        grouped_data = curve_data.groupby("model")
+
         user_opt.bounds.set_if_empty(
             a=(0, 1),
             alpha=(0, 1),
@@ -145,11 +148,11 @@ class InterleavedRBAnalysis(curve.CurveAnalysis):
         a_guess = 1 - b_guess
 
         # for standard RB curve
-        std_curve = curve_data.get_subset_of("standard")
+        std_curve = grouped_data.get_group("standard")
         alpha_std = curve.guess.rb_decay(std_curve.x, std_curve.y, a=a_guess, b=b_guess)
 
         # for interleaved RB curve
-        int_curve = curve_data.get_subset_of("interleaved")
+        int_curve = grouped_data.get_group("interleaved")
         alpha_int = curve.guess.rb_decay(int_curve.x, int_curve.y, a=a_guess, b=b_guess)
 
         alpha_c = min(alpha_int / alpha_std, 1.0)

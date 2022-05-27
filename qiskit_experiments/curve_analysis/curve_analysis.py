@@ -160,27 +160,29 @@ class CurveAnalysis(BaseCurveAnalysis):
         )
 
         if self.options.plot and self.options.plot_raw_data:
-            for model in self._models:
-                sub_data = processed_data[processed_data["model"] == model._name]
+            for name, locs in processed_data.groupby("model").groups.items():
+                sub_data = processed_data.loc[locs]
                 self.drawer.draw_raw_data(
                     x_data=sub_data.x,
                     y_data=sub_data.y,
-                    name=model._name,
+                    name=name,
                 )
+
         # for backward compatibility, will be removed in 0.4.
         self.__processed_data_set["raw_data"] = processed_data
 
         # Format data
         formatted_data = self._format_data(processed_data)
         if self.options.plot:
-            for model in self._models:
-                sub_data = formatted_data[formatted_data["model"] == model._name]
+            for name, locs in formatted_data.groupby("model").groups.items():
+                sub_data = formatted_data.loc[locs]
                 self.drawer.draw_formatted_data(
                     x_data=sub_data.x,
                     y_data=sub_data.y,
                     y_err_data=sub_data.y_err,
-                    name=model._name,
+                    name=name,
                 )
+
         # for backward compatibility, will be removed in 0.4.
         self.__processed_data_set["fit_ready"] = formatted_data
 
@@ -242,18 +244,17 @@ class CurveAnalysis(BaseCurveAnalysis):
                         y_data=y_mean,
                         name=model._name,
                     )
-                    if fit_data.covar is not None:
-                        # Draw confidence intervals with different n_sigma
-                        sigmas = unp.std_devs(y_data_with_uncertainty)
-                        if np.isfinite(sigmas).all():
-                            for n_sigma, alpha in self.drawer.options.plot_sigma:
-                                self.drawer.draw_confidence_interval(
-                                    x_data=interp_x,
-                                    y_ub=y_mean + n_sigma * sigmas,
-                                    y_lb=y_mean - n_sigma * sigmas,
-                                    name=model._name,
-                                    alpha=alpha,
-                                )
+                    # Draw confidence intervals with different n_sigma
+                    sigmas = unp.std_devs(y_data_with_uncertainty)
+                    if np.isfinite(sigmas).all():
+                        for n_sigma, alpha in self.drawer.options.plot_sigma:
+                            self.drawer.draw_confidence_interval(
+                                x_data=interp_x,
+                                y_ub=y_mean + n_sigma * sigmas,
+                                y_lb=y_mean - n_sigma * sigmas,
+                                name=model._name,
+                                alpha=alpha,
+                            )
 
                 # Write fitting report
                 report_description = ""
@@ -262,11 +263,6 @@ class CurveAnalysis(BaseCurveAnalysis):
                         report_description += f"{analysis_result_to_repr(res)}\n"
                 report_description += r"reduced-$\chi^2$ = " + f"{fit_data.reduced_chisq: .4g}"
                 self.drawer.draw_fit_report(description=report_description)
-
-        # Add raw data points
-        analysis_results.extend(
-            self._create_curve_data(curve_data=formatted_data, models=self._models)
-        )
 
         # Finalize plot
         if self.options.plot:

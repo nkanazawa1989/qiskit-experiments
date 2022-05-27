@@ -14,6 +14,7 @@
 
 from typing import List, Union
 
+import pandas as pd
 import numpy as np
 from lmfit.model import Model
 from lmfit.models import ExpressionModel
@@ -98,7 +99,7 @@ class DragCalAnalysis(curve.CurveAnalysis):
     def _generate_fit_guesses(
         self,
         user_opt: curve.FitOptions,
-        curve_data: curve.CurveData,
+        curve_data: pd.DataFrame,
     ) -> Union[curve.FitOptions, List[curve.FitOptions]]:
         """Create algorithmic guess with analysis options and curve data.
 
@@ -109,10 +110,12 @@ class DragCalAnalysis(curve.CurveAnalysis):
         Returns:
             List of fit options that are passed to the fitter function.
         """
+        grouped_data = curve_data.groupby("model")
+
         # Use the highest-frequency curve to estimate the oscillation frequency.
         max_rep_model = self._models[-1]
-        max_rep = max_rep_model.opts["data_sort_key"]["nrep"]
-        curve_data = curve_data.get_subset_of(max_rep_model._name)
+        curve_data = grouped_data.get_group(max_rep_model._name)
+        max_rep = curve_data["nrep"][0]
 
         x_data = curve_data.x
         min_beta, max_beta = min(x_data), max(x_data)

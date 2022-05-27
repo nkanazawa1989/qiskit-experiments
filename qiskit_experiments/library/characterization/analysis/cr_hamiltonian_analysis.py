@@ -16,6 +16,7 @@ from collections import defaultdict
 from itertools import product
 from typing import List, Union
 
+import pandas as pd
 import numpy as np
 from lmfit.models import ExpressionModel
 
@@ -192,7 +193,7 @@ class CrossResonanceHamiltonianAnalysis(curve.CurveAnalysis):
     def _generate_fit_guesses(
         self,
         user_opt: curve.FitOptions,
-        curve_data: curve.CurveData,
+        curve_data: pd.DataFrame,
     ) -> Union[curve.FitOptions, List[curve.FitOptions]]:
         """Create algorithmic guess with analysis options and curve data.
 
@@ -203,14 +204,15 @@ class CrossResonanceHamiltonianAnalysis(curve.CurveAnalysis):
         Returns:
             List of fit options that are passed to the fitter function.
         """
+        grouped_data = curve_data.groupby("model")
         user_opt.bounds.set_if_empty(t_off=(0, np.inf), b=(-1, 1))
         user_opt.p0.set_if_empty(b=1e-9)
 
         guesses = defaultdict(list)
         for control in (0, 1):
-            x_data = curve_data.get_subset_of(f"x|c={control}")
-            y_data = curve_data.get_subset_of(f"y|c={control}")
-            z_data = curve_data.get_subset_of(f"z|c={control}")
+            x_data = grouped_data.get_group(f"x|c={control}").reset_index()
+            y_data = grouped_data.get_group(f"y|c={control}").reset_index()
+            z_data = grouped_data.get_group(f"z|c={control}").reset_index()
 
             omega_xyz = []
             for data in (x_data, y_data, z_data):
