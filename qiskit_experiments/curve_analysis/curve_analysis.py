@@ -161,7 +161,7 @@ class CurveAnalysis(BaseCurveAnalysis):
 
         if self.options.plot and self.options.plot_raw_data:
             for model in self._models:
-                sub_data = processed_data.get_subset_of(model._name)
+                sub_data = processed_data[processed_data["model"] == model._name]
                 self.drawer.draw_raw_data(
                     x_data=sub_data.x,
                     y_data=sub_data.y,
@@ -174,7 +174,7 @@ class CurveAnalysis(BaseCurveAnalysis):
         formatted_data = self._format_data(processed_data)
         if self.options.plot:
             for model in self._models:
-                sub_data = formatted_data.get_subset_of(model._name)
+                sub_data = formatted_data[formatted_data["model"] == model._name]
                 self.drawer.draw_formatted_data(
                     x_data=sub_data.x,
                     y_data=sub_data.y,

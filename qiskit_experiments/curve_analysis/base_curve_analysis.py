@@ -17,9 +17,11 @@ Base class of curve analysis.
 import warnings
 
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from typing import List, Dict, Union
 
 import numpy as np
+import pandas as pd
 from uncertainties import unumpy as unp
 from lmfit import Model, Parameters, minimize
 
@@ -258,8 +260,8 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
 
     def _format_data(
         self,
-        curve_data: CurveData,
-    ) -> CurveData:
+        curve_data: pd.DataFrame,
+    ) -> pd.DataFrame:
         """Postprocessing for the processed dataset.
 
         Args:
@@ -276,15 +278,6 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
             sigma=curve_data.y_err,
             shots=curve_data.shots,
             method="shots_weighted",
-        )
-
-        # sort by x value in ascending order
-        data_allocation, xdata, ydata, sigma, shots = data_sort(
-            series=data_allocation,
-            xdata=xdata,
-            ydata=ydata,
-            sigma=sigma,
-            shots=shots,
         )
 
         return CurveData(
@@ -316,67 +309,64 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
         self,
         raw_data: List[Dict],
         models: List[Model],
-    ) -> CurveData:
+    ) -> pd.DataFrame:
         """Perform data processing from the experiment result payload.
 
         Args:
             raw_data: Payload in the experiment data.
-            models: A list of LMFIT models that provide the model name and
-                optionally data sorting keys.
+            models: LMFIT models to provide data sort conditions.
 
         Returns:
-            Processed data that will be sent to the formatter method.
-
-        Raises:
-            DataProcessorError: When model is multi-objective function but
-                data sorting option is not provided.
-            DataProcessorError: When key for x values is not found in the metadata.
+            Processed data frame that will be sent to the formatter method.
         """
-        x_key = self.options.x_key
+        num_data = len(raw_data)
 
-        try:
-            xdata = np.asarray([datum["metadata"][x_key] for datum in raw_data], dtype=float)
-        except KeyError as ex:
-            raise DataProcessorError(
-                f"X value key {x_key} is not defined in circuit metadata."
-            ) from ex
-
+        xdata = np.full(num_data, fill_value=np.nan)
+        shots = np.zeros(num_data)
+        extra = defaultdict(lambda: [pd.NA] * num_data)
         ydata = self.options.data_processor(raw_data)
-        shots = np.asarray([datum.get("shots", np.nan) for datum in raw_data])
 
-        def _matched(metadata, **filters):
-            try:
-                return all(metadata[key] == val for key, val in filters.items())
-            except KeyError:
-                return False
+        for i, datum in enumerate(raw_data):
+            meta = datum["metadata"]
+            for k, v in meta.items():
+                if k == self.options.x_key:
+                    xdata[i] = v
+                else:
+                    extra[k][i] = v
+            shots[i] = datum.get("shots", np.nan)
 
-        if len(models) == 1:
-            # all data belongs to the single model
-            data_allocation = np.full(xdata.size, 0, dtype=int)
-        else:
-            data_allocation = np.full(xdata.size, -1, dtype=int)
-            for idx, sub_model in enumerate(models):
+        results = pd.DataFrame.from_dict(
+            {
+                "x": xdata,
+                "y": unp.nominal_values(ydata),
+                "yerr": unp.std_devs(ydata),
+                "shots": shots,
+                "model": [pd.NA] * num_data,
+                **extra
+            }
+        )
+
+        if len(models) > 1:
+            # Tag data series with model name
+            for model in models:
                 try:
-                    tags = sub_model.opts["data_sort_key"]
+                    conds = [f"{k} == '{v}'" for k, v in model.opts["data_sort_key"].items()]
                 except KeyError as ex:
                     raise DataProcessorError(
-                        f"Data sort options for model {sub_model.name} is not defined."
+                        f"Data sort key for model '{model._name}' is not defined."
                     ) from ex
-                if tags is None:
-                    continue
-                matched_inds = np.asarray(
-                    [_matched(d["metadata"], **tags) for d in raw_data], dtype=bool
-                )
-                data_allocation[matched_inds] = idx
+                # Colum index 4 is "model" thus updating the model column here
+                results.iloc[results.query(" & ".join(conds)).index, 4] = model._name
+        else:
+            results["model"] = models[0]._name
 
-        return CurveData(
-            x=xdata,
-            y=unp.nominal_values(ydata),
-            y_err=unp.std_devs(ydata),
-            shots=shots,
-            data_allocation=data_allocation,
-            labels=[sub_model._name for sub_model in models],
-        )
+        # Lastly data sort by x column values.
+        # This is important because fit guess function assumes monotonically increase x vals.
+        # When we combine multiple experiment data for analysis, x vals are not necessary
+        # arranged in ascending order.
+        results.sort_values(by="x", inplace=True)
+
+        return results
 
     def _run_curve_fit(
         self,
