@@ -425,18 +425,26 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
         # Prepare default fitting arguments (can be overridden by fit options)
         valid_uncertainty = np.all(np.isfinite(curve_data.y_err))
 
-        # Objective function for minimize. This computes composite residuals of sub models.
-        grouped_data = curve_data.groupby("model")
+        # .get_group generates new dataframe which is a significant overhead for iteration.
+        # Here first create cache data.
+        # Roughly 40% execution time reduction with this (RamseyXY experiment)
+        source = {}
+        for group, sub_data in curve_data.groupby("model"):
+            source[group] = {
+                "x": sub_data.x.to_numpy(),
+                "y": sub_data.y.to_numpy(),
+                "w": 1.0 / sub_data.y_err.to_numpy() if valid_uncertainty else None,
+            }
 
+        # Objective function for minimize. This computes composite residuals of sub models.
         def _objective(_params):
             ys = []
             for model in models:
-                sub_data = grouped_data.get_group(model._name)
                 yi = model._residual(
                     params=_params,
-                    data=sub_data.y,
-                    weights=1.0 / sub_data.y_err if valid_uncertainty else None,
-                    x=sub_data.x,
+                    data=source[model._name]["y"],
+                    weights=source[model._name]["w"],
+                    x=source[model._name]["x"],
                 )
                 ys.append(yi)
             return np.concatenate(ys)
