@@ -14,6 +14,7 @@
 
 from typing import List, Union
 
+import pandas as pd
 import numpy as np
 from lmfit.models import ExpressionModel
 
@@ -114,7 +115,7 @@ class ErrorAmplificationAnalysis(curve.CurveAnalysis):
     def _generate_fit_guesses(
         self,
         user_opt: curve.FitOptions,
-        curve_data: curve.CurveData,
+        curve_data: pd.DataFrame,
     ) -> Union[curve.FitOptions, List[curve.FitOptions]]:
         """Create algorithmic guess with analysis options and curve data.
 

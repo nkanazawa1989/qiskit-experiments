@@ -153,7 +153,7 @@ class DragCalAnalysis(curve.CurveAnalysis):
 
     def _run_curve_fit(
         self,
-        curve_data: curve.CurveData,
+        curve_data: pd.DataFrame,
         models: List[Model],
     ) -> curve.CurveFitResult:
         r"""Perform curve fitting on given data collection and fit models.

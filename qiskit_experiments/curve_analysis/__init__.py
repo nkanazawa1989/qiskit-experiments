@@ -566,6 +566,7 @@ from .visualization import BaseCurveDrawer, MplCurveDrawer
 from . import guess
 from . import fit_function
 from . import utils
+from . import format_data
 
 # standard analysis
 from .standard_analysis import (

@@ -230,8 +230,10 @@ class CurveAnalysis(BaseCurveAnalysis):
 
             # Draw fit curves and report
             if self.options.plot:
-                interp_x = np.linspace(*fit_data.x_range, 100)
+                grouped_data = formatted_data.groupby("model")
                 for model in self._models:
+                    sub_xdata = grouped_data.get_group(model._name).x
+                    interp_x = np.linspace(np.min(sub_xdata), np.max(sub_xdata), 100)
                     y_data_with_uncertainty = eval_with_uncertainties(
                         x=interp_x,
                         model=model,

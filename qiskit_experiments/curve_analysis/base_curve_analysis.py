@@ -280,9 +280,14 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
         # Sort dataframe with model and x.
         # Take average over the same x values in the same group.
         grouped_by_model = curve_data.groupby(["model", "x"], as_index=False)
-        averaged_df = grouped_by_model.apply(shot_weighted_average)
 
-        return averaged_df
+        if len(grouped_by_model) == len(curve_data):
+            # No need to take average.
+            # Usually this is sub-dataframe wise operation which is quite slow.
+            # Avoid if possible.
+            return curve_data
+
+        return grouped_by_model.apply(shot_weighted_average)
 
     def _evaluate_quality(
         self,
@@ -313,6 +318,9 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
 
         Returns:
             Processed data frame that will be sent to the formatter method.
+
+        Raises:
+            DataProcessorError: When multiple models are provided without sorting key.
         """
         num_data = len(raw_data)
 
@@ -337,7 +345,7 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
                 "y_err": unp.std_devs(ydata),
                 "shots": shots,
                 "model": [pd.NA] * num_data,
-                **extra
+                **extra,
             }
         )
 
@@ -530,9 +538,10 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
 
         return outcomes
 
+    # pylint: disable=unused-argument
     @deprecated_function(
         "0.5",
-        msg="No need to create separate entry for curve data. This is a part of @Parameters entry."
+        msg="No need to create separate entry for curve data. This is a part of @Parameters entry.",
     )
     def _create_curve_data(
         self,

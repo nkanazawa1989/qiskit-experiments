@@ -151,8 +151,8 @@ class RBAnalysis(curve.CurveAnalysis):
 
     def _format_data(
         self,
-        curve_data: curve.CurveData,
-    ) -> curve.CurveData:
+        curve_data: pd.DataFrame,
+    ) -> pd.DataFrame:
         """Postprocessing for the processed dataset.
 
         Args:
@@ -161,35 +161,12 @@ class RBAnalysis(curve.CurveAnalysis):
         Returns:
             Formatted data.
         """
-        # TODO Eventually move this to data processor, then create RB data processor.
+        grouped_by_model = curve_data.groupby(["model", "x"], as_index=False)
 
-        # take average over the same x value by keeping sigma
-        data_allocation, xdata, ydata, sigma, shots = curve.data_processing.multi_mean_xy_data(
-            series=curve_data.data_allocation,
-            xdata=curve_data.x,
-            ydata=curve_data.y,
-            sigma=curve_data.y_err,
-            shots=curve_data.shots,
-            method="sample",
-        )
+        if len(grouped_by_model) == len(curve_data):
+            return curve_data
 
-        # sort by x value in ascending order
-        data_allocation, xdata, ydata, sigma, shots = curve.data_processing.data_sort(
-            series=data_allocation,
-            xdata=xdata,
-            ydata=ydata,
-            sigma=sigma,
-            shots=shots,
-        )
-
-        return curve.CurveData(
-            x=xdata,
-            y=ydata,
-            y_err=sigma,
-            shots=shots,
-            data_allocation=data_allocation,
-            labels=curve_data.labels,
-        )
+        return grouped_by_model.apply(curve.format_data.sampled_average)
 
     def _create_analysis_results(
         self,

@@ -14,6 +14,7 @@
 
 from typing import List, Union
 
+import pandas as pd
 import numpy as np
 from lmfit.models import ExpressionModel
 
@@ -84,7 +85,7 @@ class GaussianAnalysis(curve.CurveAnalysis):
     def _generate_fit_guesses(
         self,
         user_opt: curve.FitOptions,
-        curve_data: curve.CurveData,
+        curve_data: pd.DataFrame,
     ) -> Union[curve.FitOptions, List[curve.FitOptions]]:
         """Create algorithmic guess with analysis options and curve data.
 
@@ -131,18 +132,20 @@ class GaussianAnalysis(curve.CurveAnalysis):
               threshold of two, and
             - a standard error on the sigma of the Gaussian that is smaller than the sigma.
         """
-        freq_increment = np.mean(np.diff(fit_data.x_data))
+        freq_increment = np.mean(np.diff(fit_data.data.x))
+        minx = np.min(fit_data.data.x)
+        maxx = np.min(fit_data.data.x)
 
         fit_a = fit_data.ufloat_params["a"]
         fit_b = fit_data.ufloat_params["b"]
         fit_freq = fit_data.ufloat_params["freq"]
         fit_sigma = fit_data.ufloat_params["sigma"]
 
-        snr = abs(fit_a.n) / np.sqrt(abs(np.median(fit_data.y_data) - fit_b.n))
-        fit_width_ratio = fit_sigma.n / np.ptp(fit_data.x_data)
+        snr = abs(fit_a.n) / np.sqrt(abs(np.median(fit_data.data.y) - fit_b.n))
+        fit_width_ratio = fit_sigma.n / np.ptp(fit_data.data.y)
 
         criteria = [
-            fit_data.x_range[0] <= fit_freq.n <= fit_data.x_range[1],
+            minx <= fit_freq.n <= maxx,
             1.5 * freq_increment < fit_sigma.n,
             fit_width_ratio < 0.25,
             fit_data.reduced_chisq < 3,
