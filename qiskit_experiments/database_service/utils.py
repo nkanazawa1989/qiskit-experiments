@@ -24,6 +24,7 @@ import json
 
 import dateutil.parser
 import pkg_resources
+import pandas as pd
 from dateutil import tz
 from qiskit.version import __version__ as terra_version
 
@@ -283,3 +284,47 @@ class ThreadSafeList(ThreadSafeContainer):
         """Append to the list."""
         with self._lock:
             self._container.append(value)
+
+
+class ThreadSafeDataFrame(ThreadSafeContainer):
+    """Thread safe data frame."""
+
+    __default_columns__ = [
+        "outcome",
+        "dtype",
+        "slots",
+        "shots",
+        "status",
+    ]
+
+    def _init_container(self, init_values):
+        """Initialize the container."""
+        if init_values is None:
+            return pd.DataFrame(columns=ThreadSafeDataFrame.__default_columns__)
+        if isinstance(init_values, dict):
+            return pd.DataFrame.from_dict(
+                data=init_values,
+                orient="index",
+                columns=ThreadSafeDataFrame.__default_columns__,
+            )
+        raise TypeError(
+            f"Invalid data type {type(init_values)}. "
+            "Initialize with dictionary keyed on circuit name."
+        )
+
+    def add_data(self, other: pd.DataFrame):
+        """Add another data frame."""
+        with self._lock:
+            self._container = pd.concat([self._container, other])
+
+    def loc(self, index: Union[int, slice, str]):
+        """Get a part of data frame with row index."""
+        with self._lock:
+            if isinstance(index, str):
+                return self._container.loc[index]
+            if isinstance(index, (int, slice)):
+                return self._container.iloc[index]
+        raise TypeError(f"Invalid index type {type(index)}.")
+
+    def clear(self):
+        raise NotImplementedError

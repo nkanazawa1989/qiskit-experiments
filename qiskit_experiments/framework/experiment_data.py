@@ -14,6 +14,8 @@ Experiment Data class
 """
 
 from __future__ import annotations
+
+import collections
 import logging
 import dataclasses
 from typing import Dict, Optional, List, Union, Any, Callable, Tuple, TYPE_CHECKING
@@ -32,12 +34,14 @@ import io
 import sys
 import traceback
 import numpy as np
+import pandas as pd
 from matplotlib import pyplot
 from matplotlib.figure import Figure as MatplotlibFigure
 from qiskit.result import Result
 from qiskit.providers.jobstatus import JobStatus, JOB_FINAL_STATES
 from qiskit.exceptions import QiskitError
 from qiskit.providers import Job, Backend, Provider
+from qiskit.qobj.utils import MeasLevel, MeasReturnType
 
 from qiskit_ibm_experiment import IBMExperimentService
 from qiskit_ibm_experiment import ExperimentData as ExperimentDataclass
@@ -47,6 +51,7 @@ from qiskit_experiments.database_service.utils import (
     plot_to_svg_bytes,
     ThreadSafeOrderedDict,
     ThreadSafeList,
+    ThreadSafeDataFrame,
 )
 from qiskit_experiments.framework.analysis_result import AnalysisResult
 from qiskit_experiments.framework import BackendData
@@ -256,6 +261,7 @@ class ExperimentData:
 
         # data storage
         self._result_data = ThreadSafeList()
+        self._result_frame = ThreadSafeDataFrame()
         self._figures = ThreadSafeOrderedDict(self._db_data.figure_names)
         self._analysis_results = ThreadSafeOrderedDict()
 
@@ -904,26 +910,57 @@ class ExperimentData:
         if result.job_id not in self._jobs:
             self._jobs[result.job_id] = None
             self.job_ids.append(result.job_id)
-        with self._result_data.lock:
-            # Lock data while adding all result data
-            for i, _ in enumerate(result.results):
-                data = result.data(i)
-                data["job_id"] = result.job_id
-                if "counts" in data:
-                    # Format to Counts object rather than hex dict
-                    data["counts"] = result.get_counts(i)
-                expr_result = result.results[i]
-                if hasattr(expr_result, "header") and hasattr(expr_result.header, "metadata"):
-                    data["metadata"] = expr_result.header.metadata
-                data["shots"] = expr_result.shots
-                data["meas_level"] = expr_result.meas_level
-                if hasattr(expr_result, "meas_return"):
-                    data["meas_return"] = expr_result.meas_return
-                self._result_data.append(data)
+
+        to_add = collections.defaultdict(list)
+        cnames = []
+        for cind, circuit_data in enumerate(result.results):
+            header = circuit_data.header
+            data = circuit_data.data
+            meas_level = getattr(circuit_data, "meas_level", MeasLevel.CLASSIFIED)
+            name = getattr(header, "name", f"circuit-{cind}")
+            slots = getattr(header, "memory_slots", pd.NA)
+            shots = getattr(circuit_data, "shots", pd.NA)
+
+            if meas_level == MeasLevel.CLASSIFIED:
+                if hasattr(data, "memory"):
+                    dtype = DataFormat.CLASSIFIED_SINGLESHOT
+                    # TODO data formatting
+                    outcome = data.memory
+                else:
+                    dtype = DataFormat.CLASSIFIED_COUNT
+                    # TODO data formatting
+                    outcome = data.counts
+            elif meas_level == MeasLevel.KERNELED:
+                meas_return = getattr(circuit_data, "meas_return", MeasReturnType.AVERAGE)
+                if meas_return == MeasReturnType.AVERAGE:
+                    dtype = DataFormat.KERNELED_AVERAGED
+                    outcome = data.memory
+                elif meas_return == MeasReturnType.SINGLE:
+                    dtype = DataFormat.KERNELED_SINGLESHOT
+                    outcome = data.memory
+                else:
+                    raise ValueError(
+                        f"Invalid measurement return type {meas_return} is detected at {name}."
+                    )
+            else:
+                raise ValueError(
+                    f"Invalid measurement level {meas_level} is detected at {name}."
+                )
+            to_add["outcome"].append(outcome)
+            to_add["dtype"].append(dtype.value)
+            to_add["slots"].append(slots)
+            to_add["shots"].append(shots)
+            to_add["status"].append("raw")
+            for key, val in getattr(header, "metadata", {}).items():
+                to_add[key].append(val)
+            cnames.append(name)
+        new_df = pd.DataFrame(data=to_add, index=cnames)
+
+        self._result_frame.add_data(new_df)
 
     def _retrieve_data(self):
         """Retrieve job data if missing experiment data."""
-        if self._result_data or not self._backend:
+        if len(self._result_frame) != 0 or not self._backend:
             return
         # Get job results if missing experiment data.
         retrieved_jobs = {}
@@ -978,6 +1015,29 @@ class ExperimentData:
         if isinstance(index, str):
             return [data for data in self._result_data if data.get("job_id") == index]
         raise TypeError(f"Invalid index type {type(index)}.")
+
+    def frame(
+        self,
+        index: Optional[Union[int, slice, str]] = None,
+    ) -> pd.DataFrame:
+        """Return the experiment data at the specified index.
+
+        Args:
+            index: Index of the data to be returned.
+                Several types are accepted for convenience:
+
+                    * None: Return all experiment data.
+                    * int: Specific index of the data.
+                    * slice: A list slice of data indexes.
+                    * str: ID of the job that produced the data.
+
+        Returns:
+            Experiment data.
+        """
+        self._retrieve_data()
+        if index is None:
+            return self._result_frame.copy()
+        return self._result_frame.loc(index)
 
     @do_auto_save
     def add_figures(
@@ -2188,6 +2248,22 @@ def service_exception_to_warning():
         yield
     except Exception:  # pylint: disable=broad-except
         LOG.warning("Experiment service operation failed: %s", traceback.format_exc())
+
+
+class DataFormat(enum.Enum):
+    """Class for experiment data type."""
+
+    CLASSIFIED_COUNT = "CC"
+    CLASSIFIED_SINGLESHOT = "CS"
+    KERNELED_AVERAGED = "KA"
+    KERNELED_SINGLESHOT = "KS"
+
+    def __json_encode__(self):
+        return self.name
+
+    @classmethod
+    def __json_decode__(cls, value):
+        return cls.__members__[value]  # pylint: disable=unsubscriptable-object
 
 
 class ExperimentStatus(enum.Enum):
