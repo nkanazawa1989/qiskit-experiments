@@ -25,6 +25,7 @@ from uncertainties import unumpy
 from qiskit_experiments.curve_analysis.curve_data import CurveFitResult
 from qiskit_experiments.exceptions import AnalysisError
 from qiskit_experiments.framework import AnalysisResultData
+from qiskit_experiments.warnings import deprecated_function
 
 
 UNUMPY_FUNCS = {fn: getattr(unumpy, fn) for fn in unumpy.__all__}
@@ -57,6 +58,7 @@ def is_error_not_significant(
     return False
 
 
+@deprecated_function("0.6")
 def analysis_result_to_repr(result: AnalysisResultData) -> str:
     """A helper function to create string representation from analysis result data object.
 

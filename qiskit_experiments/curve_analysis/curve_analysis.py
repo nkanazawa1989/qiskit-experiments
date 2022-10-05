@@ -30,7 +30,7 @@ from qiskit_experiments.warnings import deprecated_function
 from .base_curve_analysis import BaseCurveAnalysis, PARAMS_ENTRY_PREFIX
 from .curve_data import CurveData, FitOptions, CurveFitResult
 from .data_processing import multi_mean_xy_data, data_sort
-from .utils import analysis_result_to_repr, eval_with_uncertainties, convert_lmfit_result
+from .utils import eval_with_uncertainties, convert_lmfit_result
 
 
 class CurveAnalysis(BaseCurveAnalysis):
@@ -504,9 +504,11 @@ class CurveAnalysis(BaseCurveAnalysis):
             curve_data=formatted_data,
             models=self._models,
         )
+        self.plotter.set_supplementary_data(fit_status=fit_data)
 
         if fit_data.success:
             quality = self._evaluate_quality(fit_data)
+            self.plotter.set_supplementary_data(red_chi=fit_data.reduced_chisq)
         else:
             quality = "bad"
 
@@ -525,11 +527,14 @@ class CurveAnalysis(BaseCurveAnalysis):
         if fit_data.success:
 
             # Create analysis results
-            analysis_results.extend(
-                self._create_analysis_results(
-                    fit_data=fit_data, quality=quality, **self.options.extra.copy()
-                )
+            extra_results = self._create_analysis_results(
+                fit_data=fit_data,
+                quality=quality,
+                **self.options.extra.copy(),
             )
+            analysis_results.extend(extra_results)
+            self.plotter.set_supplementary_data(primary_quantity=extra_results)
+
             # calling old extra entry method for backward compatibility
             if hasattr(self, "_extra_database_entry"):
                 warnings.warn(
@@ -572,14 +577,6 @@ class CurveAnalysis(BaseCurveAnalysis):
                                 model._name,
                                 y_interp_err=y_interp_err,
                             )
-
-                # Write fitting report
-                report_description = ""
-                for res in analysis_results:
-                    if isinstance(res.value, (float, UFloat)):
-                        report_description += f"{analysis_result_to_repr(res)}\n"
-                report_description += r"reduced-$\chi^2$ = " + f"{fit_data.reduced_chisq: .4g}"
-                self.plotter.set_supplementary_data(report_text=report_description)
 
         # Add raw data points
         if self.options.return_data_points:
