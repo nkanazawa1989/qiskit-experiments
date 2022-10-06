@@ -153,10 +153,10 @@ class CurvePlotter(BasePlotter):
                 red_chi = self.supplementary_data["red_chi"]
                 if len(report) > 0:
                     report += "\n"
-                report += r"reduced-$\chi^2$ = " + f"{red_chi: .4g}"
+                report += r"reduced-chi2 = " + f"{red_chi: .4g}"
 
             if len(report) > 0:
-                self.drawer.draw_text_box(report)
+                self.drawer.draw_text_box(report, )
 
     @staticmethod
     def _analysis_result_to_repr(result) -> str:
@@ -205,3 +205,11 @@ class CurvePlotter(BasePlotter):
                 value_repr = n_repr + n_unit
 
         return f"{result.name} = {value_repr}"
+
+#
+# class DashCurvePlotter(CurvePlotter):
+#
+#     def __init__(self):
+#         from qiskit_experiments.visualization.drawers import
+#         super().__init__()
+
