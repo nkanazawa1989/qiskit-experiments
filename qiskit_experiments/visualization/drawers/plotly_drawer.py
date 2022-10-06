@@ -119,7 +119,7 @@ class PlotlyDrawer(BaseDrawer):
                 t=hsize * 0.05,
                 b=hsize * 0.05,
             ),
-            hovermode='x unified',
+            hovermode='x',
             modebar=go.layout.Modebar(
                 add=["drawline", "drawopenpath", "eraseshape"],
             ),
