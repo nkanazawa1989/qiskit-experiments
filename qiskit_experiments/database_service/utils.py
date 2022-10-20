@@ -16,16 +16,18 @@ import io
 import logging
 import threading
 import traceback
+import uuid
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from datetime import datetime, timezone
-from typing import Callable, Tuple, Dict, Any, Union, Type, Optional
+from typing import Callable, Tuple, List, Dict, Any, Union, Type, Optional
 import json
 
 import dateutil.parser
 import pkg_resources
 from dateutil import tz
 from qiskit.version import __version__ as terra_version
+import pandas as pd
 
 try:
     from qiskit.providers.ibmq.experiment import (
@@ -283,3 +285,99 @@ class ThreadSafeList(ThreadSafeContainer):
         """Append to the list."""
         with self._lock:
             self._container.append(value)
+
+
+class ThreadSafeDataFrame(ThreadSafeContainer):
+    """Thread safe data frame base class."""
+
+    @classmethod
+    def default_columns(cls) -> List[str]:
+        pass
+
+    def _init_container(self, init_values: Optional[Union[Dict, List]] = None):
+        """Initialize the container."""
+        if init_values is None:
+            return pd.DataFrame(columns=self.default_columns())
+        if isinstance(init_values, list):
+            if not isinstance(init_values[0], list):
+                # This must be nested list. Each element corresponds to a single row.
+                init_values = [init_values]
+            formatted = {}
+            for init_value in init_values:
+                # generate unique entry id.
+                entry_id = str(uuid.uuid4())
+                formatted[entry_id] = init_value
+        else:
+            formatted = init_values
+        if isinstance(formatted, dict):
+            return pd.DataFrame.from_dict(
+                data=formatted,
+                orient="index",
+                columns=self.default_columns(),
+            )
+        raise TypeError(
+            f"Invalid data type '{init_values.__class__.__name__}'."
+        )
+
+    def clear(self):
+        """Remove all elements from this container."""
+        with self._lock:
+            self._container = self._init_container()
+
+    def truncated_table(self) -> pd.DataFrame:
+        to_show = [c for c in self.default_columns() if not c.startswith("_")]
+        with self._lock:
+            return self._container[to_show]
+
+    def _repr_html_(self) -> Union[str, None]:
+        with self._lock:
+            return self.truncated_table()._repr_html_()
+
+    def add_data(self, entry_id: Optional[str] = None, **kwargs):
+        """Add new data.
+
+        Args:
+            entry_id: Unique name of this entry.
+            kwargs: Data of new entry to register. Key must agree with column names.
+
+        Raises:
+            KeyError: When invalid key is specified.
+        """
+        columns = self.default_columns()
+        if not set(columns).issuperset(kwargs.keys()):
+            missing = ", ".join(kwargs.keys() - set(columns))
+            raise KeyError(f"Invalid keys {missing} are found. These keys are not defined.")
+        template = dict.fromkeys(columns)
+        template.update(kwargs)
+        entry_id = entry_id or str(uuid.uuid4())
+        with self._lock:
+            self._container.loc[entry_id] = list(template.values())
+
+    def __getattr__(self, item):
+        lock = object.__getattribute__(self, "_lock")
+
+        with lock:
+            # Lock when access to container's member.
+            container = object.__getattribute__(self, "_container")
+            if hasattr(container, item):
+                return getattr(container, item)
+        raise AttributeError(f"'ThreadSafeDataFrame' object has no attribute '{item}'")
+
+
+class AnalysisResultTable(ThreadSafeDataFrame):
+
+    @classmethod
+    def default_columns(cls) -> List[str]:
+        return [
+            "name",
+            "value",
+            "chisq",
+            "quality",
+            "device_components",
+            "extra",
+            "_experiment_id",
+            "_verified",
+            "_tags",
+            "_source",
+            "_created_in_db",
+        ]
