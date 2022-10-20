@@ -14,9 +14,11 @@ Experiment Data class
 """
 
 from __future__ import annotations
+
+import functools
 import logging
 import dataclasses
-from typing import Dict, Optional, List, Union, Any, Callable, Tuple, TYPE_CHECKING
+from typing import Dict, Optional, List, Union, Any, Callable, Tuple, Type, TYPE_CHECKING
 from datetime import datetime
 from concurrent import futures
 from threading import Event
@@ -32,6 +34,7 @@ import io
 import sys
 import traceback
 import numpy as np
+import pandas as pd
 from matplotlib import pyplot
 from matplotlib.figure import Figure as MatplotlibFigure
 from qiskit.result import Result
@@ -47,6 +50,7 @@ from qiskit_experiments.database_service.utils import (
     plot_to_svg_bytes,
     ThreadSafeOrderedDict,
     ThreadSafeList,
+    AnalysisResultTable,
 )
 from qiskit_experiments.framework.analysis_result import AnalysisResult
 from qiskit_experiments.framework import BackendData
@@ -263,7 +267,7 @@ class ExperimentData:
         # data storage
         self._result_data = ThreadSafeList()
         self._figures = ThreadSafeOrderedDict(self._db_data.figure_names)
-        self._analysis_results = ThreadSafeOrderedDict()
+        self._analysis_results = AnalysisResultTable()
 
         self._deleted_figures = deque()
         self._deleted_analysis_results = deque()
@@ -568,9 +572,8 @@ class ExperimentData:
     def _clear_results(self):
         """Delete all currently stored analysis results and figures"""
         # Schedule existing analysis results for deletion next save call
-        for key in self._analysis_results.keys():
-            self._deleted_analysis_results.append(key)
-        self._analysis_results = ThreadSafeOrderedDict()
+        self._deleted_analysis_results.extend(list(self._analysis_results.index))
+        self._analysis_results = AnalysisResultTable()
         # Schedule existing figures for deletion next save call
         for key in self._figures.keys():
             self._deleted_figures.append(key)
@@ -616,10 +619,6 @@ class ExperimentData:
         if save_val is True and not self._auto_save:
             self.save()
         self._auto_save = save_val
-        for res in self._analysis_results.values():
-            # Setting private variable directly to avoid duplicate save. This
-            # can be removed when we start tracking changes.
-            res._auto_save = save_val
         for data in self.child_data():
             data.auto_save = save_val
 
@@ -1163,8 +1162,18 @@ class ExperimentData:
         if not isinstance(results, list):
             results = [results]
 
+        data_keys = self._analysis_results.default_columns()
+        data_keys.remove("_created_in_db")
+
         for result in results:
-            self._analysis_results[result.result_id] = result
+            to_add = {"_created_in_db": result._created_in_db}
+            for key in data_keys:
+                search_key = key.lstrip("_")
+                if hasattr(result, search_key):
+                    to_add[key] = getattr(result, search_key)
+                else:
+                    to_add[key] = None
+            self._analysis_results.add_data(entry_id=result.result_id, **to_add)
 
             with contextlib.suppress(ExperimentDataError):
                 result.service = self.service
@@ -1191,12 +1200,12 @@ class ExperimentData:
         """
 
         if isinstance(result_key, int):
-            result_key = self._analysis_results.keys()[result_key]
+            result_key = self._analysis_results.index[result_key]
         else:
             # Retrieve from DB if needed.
             result_key = self.analysis_results(result_key, block=False).result_id
 
-        del self._analysis_results[result_key]
+        self._analysis_results.drop(result_key, inplace=True)
         self._deleted_analysis_results.append(result_key)
 
         if self._service and self.auto_save:
@@ -1219,11 +1228,11 @@ class ExperimentData:
                 experiment_id=self.experiment_id, limit=None, json_decoder=self._json_decoder
             )
             for result in retrieved_results:
-                result_id = result.result_id
-
-                self._analysis_results[result_id] = AnalysisResult(service=self.service)
-                self._analysis_results[result_id].set_data(result)
-                self._analysis_results[result_id]._created_in_db = True
+                # This is AnalysisResultData dataclass object. Not AnalysisResult class.
+                analysis_result = AnalysisResult(service=self.service)
+                analysis_result.set_data(result)
+                analysis_result._created_in_db = True
+                self.add_analysis_results(analysis_result)
 
     def analysis_results(
         self,
@@ -1231,7 +1240,8 @@ class ExperimentData:
         refresh: bool = False,
         block: bool = True,
         timeout: Optional[float] = None,
-    ) -> Union[AnalysisResult, List[AnalysisResult]]:
+        dataframe: bool = False,
+    ) -> pd.DataFrame:
         """Return analysis results associated with this experiment.
 
         Args:
@@ -1246,6 +1256,7 @@ class ExperimentData:
                 an experiment service is available.
             block: If True block for any analysis callbacks to finish running.
             timeout: max time in seconds to wait for analysis callbacks to finish running.
+            dataframe: For backward compatibility. Return data in AnalysisResult form.
 
         Returns:
             Analysis results for this experiment.
@@ -1259,42 +1270,36 @@ class ExperimentData:
                 self._analysis_futures.values(), name="analysis", timeout=timeout
             )
         self._retrieve_analysis_results(refresh=refresh)
-        if index is None:
-            return self._analysis_results.values()
 
-        def _make_not_found_message(index: Union[int, slice, str]) -> str:
-            """Helper to make error message for index not found"""
+        if dataframe is False:
+            warnings.warn(
+                "Returning analysis results in 'AnalysisResult' class has been deprecated. "
+                "Now data is returned in the convenient table format. "
+                "Set 'dataframe=True' to use new format.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            results = filter_analysis_result(index, self._analysis_results.full_table())
+        else:
+            results = filter_analysis_result(index, self._analysis_results.truncated_table())
+
+        if results is None:
             msg = [f"Analysis result {index} not found."]
             errors = self.errors()
             if errors:
                 msg.append(f"Errors: {errors}")
-            return "\n".join(msg)
+            raise ExperimentEntryNotFound("\n".join(msg))
 
-        if isinstance(index, int):
-            if index >= len(self._analysis_results.values()):
-                raise ExperimentEntryNotFound(_make_not_found_message(index))
-            return self._analysis_results.values()[index]
-        if isinstance(index, slice):
-            results = self._analysis_results.values()[index]
-            if not results:
-                raise ExperimentEntryNotFound(_make_not_found_message(index))
-            return results
-        if isinstance(index, str):
-            # Check by result ID
-            if index in self._analysis_results:
-                return self._analysis_results[index]
-            # Check by name
-            filtered = [
-                result for result in self._analysis_results.values() if result.name == index
-            ]
-            if not filtered:
-                raise ExperimentEntryNotFound(_make_not_found_message(index))
-            if len(filtered) == 1:
-                return filtered[0]
-            else:
-                return filtered
-
-        raise TypeError(f"Invalid index type {type(index)}.")
+        if dataframe is False:
+            # Convert back into AnalysisResult class
+            legacy_results = []
+            for result_id, series in results.iterrows():
+                result = AnalysisResult.from_pandas(result_id, series, self._service)
+                legacy_results.append(result)
+            if len(legacy_results) == 1:
+                return legacy_results[0]
+            return legacy_results
+        return results
 
     # Save and load from the database
 
@@ -1389,7 +1394,8 @@ class ExperimentData:
             LOG.warning("Could not save experiment metadata to DB, aborting experiment save")
             return
 
-        for result in self._analysis_results.values():
+        for result_id, series in self._analysis_results.iterrow():
+            result = AnalysisResult.from_pandas(result_id, series, self._service)
             result.save(suppress_errors=suppress_errors)
 
         for result in self._deleted_analysis_results.copy():
@@ -1963,8 +1969,7 @@ class ExperimentData:
         # This requires analysis callbacks to finish
         self._wait_for_futures(self._analysis_futures.values(), name="analysis")
         with self._analysis_results.lock:
-            new_instance._analysis_results = ThreadSafeOrderedDict()
-            new_instance.add_analysis_results([result.copy() for result in self.analysis_results()])
+            new_instance._analysis_results = self._analysis_results.copy_object()
         with self._figures.lock:
             new_instance._figures = ThreadSafeOrderedDict()
             new_instance.add_figures(self._figures.values())
@@ -1994,8 +1999,6 @@ class ExperimentData:
         if self._service:
             raise ExperimentDataError("An experiment service is already being used.")
         self._service = service
-        for result in self._analysis_results.values():
-            result.service = service
         with contextlib.suppress(Exception):
             self.auto_save = self._service.options.get("auto_save", False)
         for data in self.child_data():
@@ -2195,6 +2198,50 @@ def service_exception_to_warning():
         yield
     except Exception:  # pylint: disable=broad-except
         LOG.warning("Experiment service operation failed: %s", traceback.format_exc())
+
+
+def filter_analysis_result(index: Union[int, slice, str], data: pd.DataFrame) -> pd.DataFrame:
+    """Helper generic function to search analysis results."""
+    filt_data = _filter_analysis_result(index, data)
+
+    if isinstance(filt_data, pd.Series):
+        return pd.DataFrame([filt_data])
+    return data
+
+
+@functools.singledispatch
+def _filter_analysis_result(index, data):
+    if index is None:
+        return data
+    raise TypeError(f"Invalid index specifier format '{index}'.")
+
+
+@_filter_analysis_result.register
+def _(index: int, data: pd.DataFrame):
+    if index >= len(data):
+        return None
+    return data.iloc[index]
+
+
+@_filter_analysis_result.register
+def _(index: slice, data: pd.DataFrame):
+    results = data[index]
+    if not results:
+        return None
+    return results
+
+
+@_filter_analysis_result.register
+def _(index: str, data: pd.DataFrame):
+    if index in data.index:
+        # Check by result ID
+        return data.loc[index]
+    else:
+        # Check by name
+        results = data[data["name"] == index]
+        if not results:
+            return None
+    return results
 
 
 class ExperimentStatus(enum.Enum):

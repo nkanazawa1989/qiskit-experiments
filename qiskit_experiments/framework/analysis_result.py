@@ -153,6 +153,25 @@ class AnalysisResult:
         self._db_data.quality = self.RESULT_QUALITY_TO_TEXT.get(self._db_data.quality, "unknown")
 
     @classmethod
+    def from_pandas(cls, result_id, series, service):
+        res_dict = series.to_dict()
+
+        return AnalysisResult(
+            name=res_dict["name"],
+            value=res_dict["value"],
+            device_components=res_dict["device_components"],
+            experiment_id=res_dict["_experiment_id"],
+            result_id=result_id,
+            chisq=res_dict["chisq"],
+            quality=res_dict["quality"],
+            extra=res_dict["extra"],
+            verified=res_dict["_verified"],
+            tags=res_dict["_tags"],
+            service=service,
+            source=res_dict["_source"],
+        )
+
+    @classmethod
     def default_source(cls) -> Dict[str, str]:
         """The default source dictionary to generate"""
         return {

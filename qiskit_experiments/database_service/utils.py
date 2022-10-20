@@ -329,6 +329,9 @@ class ThreadSafeDataFrame(ThreadSafeContainer):
         with self._lock:
             return self._container[to_show]
 
+    def full_table(self) -> pd.DataFrame:
+        return self.copy()
+
     def _repr_html_(self) -> Union[str, None]:
         with self._lock:
             return self.truncated_table()._repr_html_()
