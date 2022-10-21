@@ -290,14 +290,19 @@ class ThreadSafeList(ThreadSafeContainer):
 class ThreadSafeDataFrame(ThreadSafeContainer):
     """Thread safe data frame base class."""
 
+    def __init__(self, init_values=None):
+        """ThreadSafeContainer constructor."""
+        self._columns = self._default_columns()
+        super().__init__(init_values)
+
     @classmethod
-    def default_columns(cls) -> List[str]:
-        pass
+    def _default_columns(cls) -> List[str]:
+        return []
 
     def _init_container(self, init_values: Optional[Union[Dict, List]] = None):
         """Initialize the container."""
         if init_values is None:
-            return pd.DataFrame(columns=self.default_columns())
+            return pd.DataFrame(columns=self.get_columns())
         if isinstance(init_values, list):
             if not isinstance(init_values[0], list):
                 # This must be nested list. Each element corresponds to a single row.
@@ -313,11 +318,35 @@ class ThreadSafeDataFrame(ThreadSafeContainer):
             return pd.DataFrame.from_dict(
                 data=formatted,
                 orient="index",
-                columns=self.default_columns(),
+                columns=self.get_columns(),
             )
         raise TypeError(
             f"Invalid data type '{init_values.__class__.__name__}'."
         )
+
+    def get_columns(self) -> List[str]:
+        """Return current column names.
+
+        Returns:
+            List of column names.
+        """
+        return self._columns.copy()
+
+    def add_columns(self, *new_columns: str):
+        """Add new columns to the table.
+
+        This operation mutates the current container.
+
+        Args:
+            new_columns: Name of columns to add.
+        """
+        # Order sensitive
+        new_columns = [c for c in new_columns if c not in self.get_columns()]
+        # Update current table
+        with self._lock:
+            for new_column in new_columns:
+                self._container.insert(len(self._container.columns), new_column, None)
+        self._columns.extend(new_columns)
 
     def clear(self):
         """Remove all elements from this container."""
@@ -325,11 +354,23 @@ class ThreadSafeDataFrame(ThreadSafeContainer):
             self._container = self._init_container()
 
     def truncated_table(self) -> pd.DataFrame:
-        to_show = [c for c in self.default_columns() if not c.startswith("_")]
+        """Return dataframe with truncated columns.
+
+        Columns with underscored name are removed for visualization for the end-users.
+
+        Returns:
+            Data frame.
+        """
+        to_show = [c for c in self.get_columns() if not c.startswith("_")]
         with self._lock:
             return self._container[to_show]
 
     def full_table(self) -> pd.DataFrame:
+        """Return dataframe with full columns.
+
+        Returns:
+            Data frame.
+        """
         return self.copy()
 
     def _repr_html_(self) -> Union[str, None]:
@@ -346,7 +387,7 @@ class ThreadSafeDataFrame(ThreadSafeContainer):
         Raises:
             KeyError: When invalid key is specified.
         """
-        columns = self.default_columns()
+        columns = self.get_columns()
         if not set(columns).issuperset(kwargs.keys()):
             missing = ", ".join(kwargs.keys() - set(columns))
             raise KeyError(f"Invalid keys {missing} are found. These keys are not defined.")
@@ -370,14 +411,14 @@ class ThreadSafeDataFrame(ThreadSafeContainer):
 class AnalysisResultTable(ThreadSafeDataFrame):
 
     @classmethod
-    def default_columns(cls) -> List[str]:
+    def _default_columns(cls) -> List[str]:
         return [
             "name",
             "value",
             "chisq",
             "quality",
             "device_components",
-            "extra",
+            "_extra",
             "_experiment_id",
             "_verified",
             "_tags",

@@ -45,6 +45,7 @@ from qiskit.providers import Job, Backend, Provider
 from qiskit_ibm_experiment import IBMExperimentService
 from qiskit_ibm_experiment import ExperimentData as ExperimentDataclass
 from qiskit_experiments.framework.json import ExperimentEncoder, ExperimentDecoder
+from qiskit_experiments.database_service.device_component import Qubit
 from qiskit_experiments.database_service.utils import (
     qiskit_version,
     plot_to_svg_bytes,
@@ -1159,10 +1160,11 @@ class ExperimentData:
         Args:
             results: Analysis results to be saved.
         """
+        # TODO deprecate this at some point
         if not isinstance(results, list):
             results = [results]
 
-        data_keys = self._analysis_results.default_columns()
+        data_keys = self._analysis_results.get_columns()
         data_keys.remove("_created_in_db")
 
         for result in results:
@@ -1181,6 +1183,62 @@ class ExperimentData:
 
             if self.auto_save and self._service:
                 result.save()
+
+    @do_auto_save
+    def add_analysis_results_from_kwargs(
+        self,
+        result_id: Optional[str] = None,
+        **kwargs,
+    ) -> None:
+        """Add single analysis result entry with keyword arguments.
+
+        Arbitrary key can be used, but one not defined in the result table
+        is stored as "_extra" which is not appeared in the analysis results data frame.
+        Missing field and required system information will be automatically
+        generated and thus experiment author doesn't need to format the key by oneself.
+
+        Args:
+            result_id: Unique string identifier of this entry.
+            kwargs: Data of analysis result to register.
+        """
+        # Key order sensitive
+        to_add = dict.fromkeys(self._analysis_results.get_columns())
+        to_add.update(
+            {
+                "_extra": kwargs.get("extra", {}),
+                "_experiment_id": self.experiment_id,
+                "_verified": False,
+                "_tags": self.tags,
+                "_source": self.source,
+                "_created_in_db": False,
+            }
+        )
+        if "device_components" not in kwargs:
+            if "physical_qubits" in self.metadata:
+                device_components = [
+                    Qubit(qubit) for qubit in self.metadata["physical_qubits"]
+                ]
+            else:
+                device_components = []
+            to_add["device_components"] = device_components
+
+        # Generate extra information.
+        # Columns not defined by analysis table are stored in the "extra" in database.
+        # This is conventional database service schema.
+        for key, value in kwargs.items():
+            if key not in to_add:
+                to_add["_extra"][key] = value
+            else:
+                to_add[key] = value
+
+        result_id = result_id or str(uuid.uuid4())
+        self._analysis_results.add_data(entry_id=result_id, **to_add)
+
+        # For autosave. In future generation of AnalysisResult should be bypassed.
+        if self.auto_save and self._service:
+            added_series = self._analysis_results.loc[result_id]
+            result = AnalysisResult.from_pandas(result_id, added_series, self._service)
+            result.save()
 
     @do_auto_save
     def delete_analysis_result(
