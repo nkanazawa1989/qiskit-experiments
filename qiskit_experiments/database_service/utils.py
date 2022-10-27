@@ -17,11 +17,13 @@ import logging
 import threading
 import traceback
 import uuid
+import warnings
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Callable, Tuple, List, Dict, Any, Union, Type, Optional
 import json
+import numpy as np
 
 import dateutil.parser
 import pkg_resources
@@ -299,10 +301,12 @@ class ThreadSafeDataFrame(ThreadSafeContainer):
     def _default_columns(cls) -> List[str]:
         return []
 
-    def _init_container(self, init_values: Optional[Union[Dict, List]] = None):
+    def _init_container(self, init_values: Optional[Union[Dict, List, pd.DataFrame]] = None):
         """Initialize the container."""
         if init_values is None:
             return pd.DataFrame(columns=self.get_columns())
+        if isinstance(init_values, pd.DataFrame):
+            return init_values
         if isinstance(init_values, list):
             if not isinstance(init_values[0], list):
                 # This must be nested list. Each element corresponds to a single row.
@@ -345,7 +349,7 @@ class ThreadSafeDataFrame(ThreadSafeContainer):
         # Update current table
         with self._lock:
             for new_column in new_columns:
-                self._container.insert(len(self._container.columns), new_column, None)
+                self._container.insert(len(self._container.columns), new_column, np.nan)
         self._columns.extend(new_columns)
 
     def clear(self):
@@ -396,6 +400,15 @@ class ThreadSafeDataFrame(ThreadSafeContainer):
         entry_id = entry_id or str(uuid.uuid4())
         with self._lock:
             self._container.loc[entry_id] = list(template.values())
+
+    def concat(self, other: pd.DataFrame):
+        """Thread safe concatenation of data frame.
+
+        Args:
+            other: Data frame to concatenate.
+        """
+        with self._lock:
+            self._container = pd.concat([self._container, other])
 
     def __getattr__(self, item):
         lock = object.__getattribute__(self, "_lock")

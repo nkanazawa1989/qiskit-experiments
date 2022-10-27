@@ -20,16 +20,14 @@ from typing import Dict, List, Tuple, Union, Optional
 
 import lmfit
 import numpy as np
+import pandas as pd
 from uncertainties import unumpy as unp
 
-from qiskit_experiments.exceptions import AnalysisError
-from qiskit_experiments.framework import ExperimentData, AnalysisResultData, AnalysisConfig
 from qiskit_experiments.data_processing.exceptions import DataProcessorError
-from qiskit_experiments.warnings import deprecated_function
-
-from .base_curve_analysis import BaseCurveAnalysis, PARAMS_ENTRY_PREFIX
+from qiskit_experiments.framework import ExperimentData, AnalysisResultData, AnalysisConfig
+from .base_curve_analysis import BaseCurveAnalysis
 from .curve_data import CurveData, FitOptions, CurveFitResult
-from .data_processing import multi_mean_xy_data, data_sort
+from .formatter import shot_weighted_average, sample_average, iwv_average
 from .utils import eval_with_uncertainties, convert_lmfit_result
 
 
@@ -183,46 +181,11 @@ class CurveAnalysis(BaseCurveAnalysis):
         """Return fit models."""
         return self._models
 
-    # pylint: disable=bad-docstring-quotes
-    @deprecated_function(
-        last_version="0.4",
-        msg=(
-            "CurveAnalysis will also drop internal cache of processed data after 0.4. "
-            "Relevant method signature has been updated to directly receive curve data "
-            "rather than accessing data with this method."
-        ),
-    )
-    def _data(
-        self,
-        series_name: Optional[str] = None,
-        label: Optional[str] = "fit_ready",
-    ) -> CurveData:
-        """Deprecated. Getter for experiment data set.
-
-        Args:
-            series_name: Series name to search for.
-            label: Label attached to data set. By default, it returns "fit_ready" data.
-
-        Returns:
-            Filtered curve data set.
-
-        Raises:
-            AnalysisError: When requested series or label are not defined.
-        """
-        try:
-            data = self.__processed_data_set[label]
-        except KeyError as ex:
-            raise AnalysisError(f"Requested data with label {label} does not exist.") from ex
-
-        if series_name is None:
-            return data
-        return data.get_subset_of(series_name)
-
     def _run_data_processing(
         self,
         raw_data: List[Dict],
         models: List[lmfit.Model],
-    ) -> CurveData:
+    ) -> pd.DataFrame:
         """Perform data processing from the experiment result payload.
 
         Args:
@@ -231,7 +194,7 @@ class CurveAnalysis(BaseCurveAnalysis):
                 optionally data sorting keys.
 
         Returns:
-            Processed data that will be sent to the formatter method.
+            Curve analysis dataset.
 
         Raises:
             DataProcessorError: When model is a multi-objective function but
@@ -266,9 +229,12 @@ class CurveAnalysis(BaseCurveAnalysis):
 
         if len(models) == 1:
             # all data belongs to the single model
-            data_allocation = np.full(xdata.size, 0, dtype=int)
+            model_name = np.full(xdata.size, models[0]._name, dtype=object)
+            model_index = np.full(xdata.size, 0, dtype=int)
         else:
-            data_allocation = np.full(xdata.size, -1, dtype=int)
+            model_name = np.full(xdata.size, "unassigned", dtype=object)
+            model_index = np.full(xdata.size, np.nan, dtype=int)
+
             for idx, sub_model in enumerate(models):
                 try:
                     tags = sub_model.opts["data_sort_key"]
@@ -281,61 +247,54 @@ class CurveAnalysis(BaseCurveAnalysis):
                 matched_inds = np.asarray(
                     [_matched(d["metadata"], **tags) for d in analyzed_data], dtype=bool
                 )
-                data_allocation[matched_inds] = idx
+                model_name[matched_inds] = sub_model._name
+                model_index[matched_inds] = idx
 
-        return CurveData(
-            x=xdata,
-            y=unp.nominal_values(ydata),
-            y_err=unp.std_devs(ydata),
-            shots=shots,
-            data_allocation=data_allocation,
-            labels=[sub_model._name for sub_model in models],
-        )
+        to_df = {
+            "x_val": xdata,
+            "y_val": unp.nominal_values(ydata),
+            "y_err": unp.std_devs(ydata),
+            "samples": shots,
+            "model_name": model_name,
+            "model_index": model_index,
+            "analysis_group": np.full(xdata.size, self._name, dtype=object),
+            "data_kind": np.full(xdata.size, "raw", dtype=object)
+        }
+
+        return pd.DataFrame.from_dict(to_df)
 
     def _format_data(
         self,
-        curve_data: CurveData,
-    ) -> CurveData:
+        curve_data: pd.DataFrame,
+    ) -> pd.DataFrame:
         """Postprocessing for the processed dataset.
 
         Args:
-            curve_data: Processed dataset created from experiment results.
+            curve_data: Curve analysis dataset.
 
         Returns:
-            Formatted data.
+            Curve analysis dataset with formatted entries.
         """
-        # take average over the same x value by keeping sigma
-        data_allocation, xdata, ydata, sigma, shots = multi_mean_xy_data(
-            series=curve_data.data_allocation,
-            xdata=curve_data.x,
-            ydata=curve_data.y,
-            sigma=curve_data.y_err,
-            shots=curve_data.shots,
-            method=self.options.average_method,
-        )
+        # Average data
+        grouped_by_model = curve_data.groupby(["model_index", "x_val"], as_index=False)
+        if len(grouped_by_model) == len(curve_data):
+            sorted_data = curve_data.sort_values("x_val", inplace=False)
+            sorted_data.loc[:, "data_kind"] = "formatted"
+            return pd.concat([curve_data, sorted_data])
 
-        # sort by x value in ascending order
-        data_allocation, xdata, ydata, sigma, shots = data_sort(
-            series=data_allocation,
-            xdata=xdata,
-            ydata=ydata,
-            sigma=sigma,
-            shots=shots,
-        )
-
-        return CurveData(
-            x=xdata,
-            y=ydata,
-            y_err=sigma,
-            shots=shots,
-            data_allocation=data_allocation,
-            labels=curve_data.labels,
-        )
+        avg_methods = {
+            "shots_weighted": shot_weighted_average,
+            "sample": sample_average,
+            "iwv": iwv_average,
+        }
+        # Data is automatically sorted by groupby operation.
+        avg_data = grouped_by_model.apply(avg_methods[self.options.average_method])
+        return pd.concat([curve_data, avg_data])
 
     def _generate_fit_guesses(
         self,
         user_opt: FitOptions,
-        curve_data: CurveData,  # pylint: disable=unused-argument
+        curve_data: pd.DataFrame,  # pylint: disable=unused-argument
     ) -> Union[FitOptions, List[FitOptions]]:
         """Create algorithmic initial fit guess from analysis options and curve data.
 
@@ -350,19 +309,24 @@ class CurveAnalysis(BaseCurveAnalysis):
 
     def _run_curve_fit(
         self,
-        curve_data: CurveData,
+        curve_data: pd.DataFrame,
         models: List[lmfit.Model],
     ) -> CurveFitResult:
         """Perform curve fitting on given data collection and fit models.
 
         Args:
-            curve_data: Formatted data to fit.
+            curve_data: Curve analysis dataset.
             models: A list of LMFIT models that are used to build a cost function
                 for the LMFIT minimizer.
 
         Returns:
             The best fitting outcome with minimum reduced chi-squared value.
         """
+        # Patch the properties for backward compatibility
+        cond = curve_data.data_kind == "formatted"
+        data_to_fit = curve_data[cond]
+        data_to_fit.__class__ = CurveData
+
         unite_parameter_names = []
         for model in models:
             # Seems like this is not efficient looping, but using set operation sometimes
@@ -395,7 +359,7 @@ class CurveAnalysis(BaseCurveAnalysis):
             fixed_parameters = {}
 
         try:
-            fit_options = self._generate_fit_guesses(default_fit_opt, curve_data)
+            fit_options = self._generate_fit_guesses(default_fit_opt, data_to_fit)
         except TypeError:
             warnings.warn(
                 "Calling '_generate_fit_guesses' method without curve data has been "
@@ -408,22 +372,28 @@ class CurveAnalysis(BaseCurveAnalysis):
         if isinstance(fit_options, FitOptions):
             fit_options = [fit_options]
 
-        valid_uncertainty = np.all(np.isfinite(curve_data.y_err))
+        valid_uncertainty = np.all(np.isfinite(data_to_fit.y_err))
+
+        # Pre generate formatted data structure for speedup.
+        sub_data = []
+        for model in models:
+            cond = data_to_fit.model_name == model._name
+            model_data = data_to_fit[cond]
+            sub_data.append(
+                (
+                    model_data.x_val.to_numpy(),
+                    model_data.y_val.to_numpy(),
+                    1.0 / model_data.y_err.to_numpy() if valid_uncertainty else None,
+                )
+            )
 
         # Objective function for minimize. This computes composite residuals of sub models.
         def _objective(_params):
             ys = []
-            for model in models:
-                sub_data = curve_data.get_subset_of(model._name)
-                yi = model._residual(
-                    params=_params,
-                    data=sub_data.y,
-                    weights=1.0 / sub_data.y_err if valid_uncertainty else None,
-                    x=sub_data.x,
-                )
+            for model, (x, y, w) in zip(models, sub_data):
+                yi = model._residual(params=_params, data=y, weights=w, x=x)
                 ys.append(yi)
             return np.concatenate(ys)
-
         # Run fit for each configuration
         res = None
         for fit_option in fit_options:
@@ -458,7 +428,81 @@ class CurveAnalysis(BaseCurveAnalysis):
             if new.success and res.redchi > new.redchi:
                 res = new
 
-        return convert_lmfit_result(res, models, curve_data.x, curve_data.y)
+        return convert_lmfit_result(res, models, data_to_fit.x_val, data_to_fit.y_val)
+
+    def _draw_figures(
+        self,
+        curve_data: pd.DataFrame,
+        fit_data: CurveFitResult,
+        analysis_results: List[AnalysisResultData],
+    ) -> List["pyplot.Figure"]:
+        """Draw figures with experiment data and analysis data.
+
+        Args:
+            curve_data: Curve analysis dataset.
+            fit_data: Result of fitting.
+            analysis_results: Analyzed experimental quantities.
+
+        Returns:
+            Figures.
+        """
+        for model in self._models:
+            model_name = model._name
+            cond = curve_data.model_name == model_name
+            sub_data = curve_data[cond]
+            if len(sub_data) == 0:
+                # If data is empty, skip drawing this model.
+                # This is the case when fit model exist but no data to fit is provided.
+                # For example, experiment may omit experimenting with some setting.
+                continue
+            if self.options.plot_raw_data:
+                cond = sub_data.data_kind == "raw"
+                raw_data = sub_data[cond]
+                self.plotter.set_series_data(
+                    model_name,
+                    x=raw_data.x_val,
+                    y=raw_data.y_val,
+                )
+            cond = sub_data.data_kind == "formatted"
+            formatted_data = sub_data[cond]
+            self.plotter.set_series_data(
+                model_name,
+                x_formatted=formatted_data.x_val,
+                y_formatted=formatted_data.y_val,
+                y_formatted_err=formatted_data.y_err,
+            )
+            if fit_data.success:
+                # Draw fit line
+                x_interp = np.linspace(
+                    np.min(formatted_data.x_val), np.max(formatted_data.x_val), num=100
+                )
+                y_data_with_uncertainty = eval_with_uncertainties(
+                    x=x_interp,
+                    model=model,
+                    params=fit_data.ufloat_params,
+                )
+                y_interp = unp.nominal_values(y_data_with_uncertainty)
+                # Add fit line data
+                self.plotter.set_series_data(
+                    model_name,
+                    x_interp=x_interp,
+                    y_interp=y_interp,
+                )
+                if fit_data.covar is not None:
+                    # Add confidence interval data
+                    y_interp_err = unp.std_devs(y_data_with_uncertainty)
+                    if np.isfinite(y_interp_err).all():
+                        self.plotter.set_series_data(
+                            model_name,
+                            y_interp_err=y_interp_err,
+                        )
+
+        # Add supplementary data
+        if fit_data.success:
+            self.plotter.set_supplementary_data(fit_red_chi=fit_data.reduced_chisq)
+            self.plotter.set_supplementary_data(primary_results=analysis_results)
+
+        return [self.plotter.figure()]
 
     def _run_analysis(
         self, experiment_data: ExperimentData
@@ -469,121 +513,55 @@ class CurveAnalysis(BaseCurveAnalysis):
         analysis_results = []
 
         # Run data processing
-        processed_data = self._run_data_processing(
+        curve_data = self._run_data_processing(
             raw_data=experiment_data.data(),
             models=self._models,
         )
-
-        if self.options.plot and self.options.plot_raw_data:
-            for model in self._models:
-                sub_data = processed_data.get_subset_of(model._name)
-                self.plotter.set_series_data(
-                    model._name,
-                    x=sub_data.x,
-                    y=sub_data.y,
-                )
-        # for backward compatibility, will be removed in 0.4.
-        self.__processed_data_set["raw_data"] = processed_data
-
         # Format data
-        formatted_data = self._format_data(processed_data)
-        if self.options.plot:
-            for model in self._models:
-                sub_data = formatted_data.get_subset_of(model._name)
-                self.plotter.set_series_data(
-                    model._name,
-                    x_formatted=sub_data.x,
-                    y_formatted=sub_data.y,
-                    y_formatted_err=sub_data.y_err,
-                )
-        # for backward compatibility, will be removed in 0.4.
-        self.__processed_data_set["fit_ready"] = formatted_data
+        curve_data = self._format_data(curve_data)
 
         # Run fitting
         fit_data = self._run_curve_fit(
-            curve_data=formatted_data,
+            curve_data=curve_data,
             models=self._models,
         )
 
         if fit_data.success:
-            quality = self._evaluate_quality(fit_data)
-            self.plotter.set_supplementary_data(fit_red_chi=fit_data.reduced_chisq)
-        else:
-            quality = "bad"
-
-        if self.options.return_fit_parameters:
-            # Store fit status overview entry regardless of success.
-            # This is sometime useful when debugging the fitting code.
-            overview = AnalysisResultData(
-                name=PARAMS_ENTRY_PREFIX + self.name,
-                value=fit_data,
-                quality=quality,
-                extra=self.options.extra,
-            )
-            analysis_results.append(overview)
-
-        # Create figure and result data
-        if fit_data.success:
-            # Create analysis results
             primary_results = self._create_analysis_results(
-                fit_data=fit_data, quality=quality, **self.options.extra.copy()
+                fit_data=fit_data,
+                quality=self._evaluate_quality(fit_data),
+                **self.options.extra.copy(),
             )
             analysis_results.extend(primary_results)
-            self.plotter.set_supplementary_data(primary_results=primary_results)
-            # calling old extra entry method for backward compatibility
-            if hasattr(self, "_extra_database_entry"):
-                warnings.warn(
-                    "Method '_extra_database_entry' has been deprecated and will be "
-                    "removed after 0.4. Please override new method "
-                    "'_create_analysis_results' with updated method signature.",
-                    DeprecationWarning,
-                )
-                deprecated_method = getattr(self, "_extra_database_entry")
-                analysis_results.extend(deprecated_method(fit_data))
+        else:
+            primary_results = []
 
-            # Draw fit curves and report
-            if self.options.plot:
-                for model in self._models:
-                    sub_data = formatted_data.get_subset_of(model._name)
-                    if sub_data.x.size == 0:
-                        # If data is empty, skip drawing this model.
-                        # This is the case when fit model exist but no data to fit is provided.
-                        # For example, experiment may omit experimenting with some setting.
-                        continue
-                    x_interp = np.linspace(np.min(sub_data.x), np.max(sub_data.x), num=100)
-
-                    y_data_with_uncertainty = eval_with_uncertainties(
-                        x=x_interp,
-                        model=model,
-                        params=fit_data.ufloat_params,
-                    )
-                    y_interp = unp.nominal_values(y_data_with_uncertainty)
-                    # Add fit line data
-                    self.plotter.set_series_data(
-                        model._name,
-                        x_interp=x_interp,
-                        y_interp=y_interp,
-                    )
-                    if fit_data.covar is not None:
-                        # Add confidence interval data
-                        y_interp_err = unp.std_devs(y_data_with_uncertainty)
-                        if np.isfinite(y_interp_err).all():
-                            self.plotter.set_series_data(
-                                model._name,
-                                y_interp_err=y_interp_err,
-                            )
-
-        # Add raw data points
+        if self.options.return_fit_parameters:
+            warnings.warn(
+                "Now overview data is stored in the .artifacts of the ExperimentData. "
+                "Enabling this option no longer create new analysis results. ",
+                DeprecationWarning,
+            )
         if self.options.return_data_points:
-            analysis_results.extend(
-                self._create_curve_data(curve_data=formatted_data, models=self._models)
+            warnings.warn(
+                "Now curve data is stored in the .artifacts of the ExperimentData. "
+                "Enabling this option no longer create new analysis results.",
+                DeprecationWarning,
             )
 
-        # Finalize plot
-        if self.options.plot:
-            return analysis_results, [self.plotter.figure()]
+        # Save dataset in artifacts
+        # TODO composite analysis may override this entry.
+        #  Need to define some structure.
+        experiment_data.artifacts["curve_fit_overview"] = fit_data
+        experiment_data.artifacts["curve_data"] = curve_data
 
-        return analysis_results, []
+        # Draw figures
+        if self.options.plot:
+            figures = self._draw_figures(curve_data, fit_data, primary_results)
+        else:
+            figures = []
+
+        return analysis_results, figures
 
     def __getstate__(self):
         state = self.__dict__.copy()

@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import lmfit
 import numpy as np
+import pandas as pd
 from uncertainties import unumpy as unp
 
 from qiskit_experiments.framework import (
@@ -35,8 +36,7 @@ from qiskit_experiments.visualization import (
     MplDrawer,
 )
 from qiskit_experiments.warnings import deprecated_function
-
-from .base_curve_analysis import PARAMS_ENTRY_PREFIX, BaseCurveAnalysis
+from .base_curve_analysis import BaseCurveAnalysis
 from .curve_data import CurveFitResult
 from .utils import eval_with_uncertainties
 
@@ -271,6 +271,89 @@ class CompositeCurveAnalysis(BaseAnalysis):
                 )
         super().set_options(**fields)
 
+    def _draw_figures(
+        self,
+        curve_data: pd.DataFrame,
+        fit_dataset: Dict[str, CurveFitResult],
+        analysis_results: List[AnalysisResultData],
+    ) -> List["pyplot.Figure"]:
+        """Draw figures with experiment data and analysis data.
+
+        Args:
+            curve_data: Curve analysis dataset.
+            fit_dataset: Result of fitting.
+            analysis_results: Analyzed experimental quantities.
+
+        Returns:
+            Figures.
+        """
+        red_chi = {}
+        for analysis in self._analyses:
+            for model in analysis.models:
+                model_name = model._name
+                cond = (
+                    (curve_data.model_name == model_name) &
+                    (curve_data.analysis_group == analysis.name)
+                )
+                sub_data = curve_data[cond]
+                fit_data = fit_dataset[analysis.name]
+                if len(sub_data) == 0:
+                    # If data is empty, skip drawing this model.
+                    # This is the case when fit model exist but no data to fit is provided.
+                    # For example, experiment may omit experimenting with some setting.
+                    continue
+                if analysis.options.plot_raw_data:
+                    cond = sub_data.data_kind == "raw"
+                    raw_data = sub_data[cond]
+                    self.plotter.set_series_data(
+                        model_name + f"_{analysis.name}",
+                        x=raw_data.x_val,
+                        y=raw_data.y_val,
+                    )
+                cond = sub_data.data_kind == "formatted"
+                formatted_data = sub_data[cond]
+                self.plotter.set_series_data(
+                    model_name + f"_{analysis.name}",
+                    x_formatted=formatted_data.x_val,
+                    y_formatted=formatted_data.y_val,
+                    y_formatted_err=formatted_data.y_err,
+                )
+                if fit_data.success:
+                    red_chi[analysis.name] = fit_data.reduced_chisq
+
+                    # Draw fit line
+                    x_interp = np.linspace(
+                        np.min(formatted_data.x_val), np.max(formatted_data.x_val), num=100
+                    )
+                    y_data_with_uncertainty = eval_with_uncertainties(
+                        x=x_interp,
+                        model=model,
+                        params=fit_data.ufloat_params,
+                    )
+                    y_interp = unp.nominal_values(y_data_with_uncertainty)
+                    # Add fit line data
+                    self.plotter.set_series_data(
+                        model_name + f"_{analysis.name}",
+                        x_interp=x_interp,
+                        y_interp=y_interp,
+                    )
+                    if fit_data.covar is not None:
+                        # Add confidence interval data
+                        y_interp_err = unp.std_devs(y_data_with_uncertainty)
+                        if np.isfinite(y_interp_err).all():
+                            self.plotter.set_series_data(
+                                model_name + f"_{analysis.name}",
+                                y_interp_err=y_interp_err,
+                            )
+
+        # Add supplementary data
+        if red_chi:
+            self.plotter.set_supplementary_data(fit_red_chi=red_chi)
+        if analysis_results:
+            self.plotter.set_supplementary_data(primary_results=analysis_results)
+
+        return [self.plotter.figure()]
+
     def _run_analysis(
         self,
         experiment_data: ExperimentData,
@@ -279,110 +362,53 @@ class CompositeCurveAnalysis(BaseAnalysis):
         analysis_results = []
 
         fit_dataset = {}
-        red_chi = {}
+        composite_curve_data = []
         for analysis in self._analyses:
             analysis._initialize(experiment_data)
 
             metadata = analysis.options.extra.copy()
             metadata["group"] = analysis.name
 
-            processed_data = analysis._run_data_processing(
+            # Run data processing
+            curve_data = analysis._run_data_processing(
                 raw_data=experiment_data.data(),
                 models=analysis.models,
             )
-
-            if self.options.plot and analysis.options.plot_raw_data:
-                for model in analysis.models:
-                    sub_data = processed_data.get_subset_of(model._name)
-                    self.plotter.set_series_data(
-                        model._name + f"_{analysis.name}",
-                        x=sub_data.x,
-                        y=sub_data.y,
-                    )
-
             # Format data
-            formatted_data = analysis._format_data(processed_data)
-            if self.options.plot:
-                for model in analysis.models:
-                    sub_data = formatted_data.get_subset_of(model._name)
-                    self.plotter.set_series_data(
-                        model._name + f"_{analysis.name}",
-                        x_formatted=sub_data.x,
-                        y_formatted=sub_data.y,
-                        y_formatted_err=sub_data.y_err,
-                    )
+            curve_data = analysis._format_data(curve_data)
 
             # Run fitting
             fit_data = analysis._run_curve_fit(
-                curve_data=formatted_data,
+                curve_data=curve_data,
                 models=analysis.models,
             )
 
             if fit_data.success:
-                quality = analysis._evaluate_quality(fit_data)
-                red_chi[analysis.name] = fit_data.reduced_chisq
-            else:
-                quality = "bad"
-
-            if self.options.return_fit_parameters:
-                overview = AnalysisResultData(
-                    name=PARAMS_ENTRY_PREFIX + analysis.name,
-                    value=fit_data,
-                    quality=quality,
-                    extra=metadata,
-                )
-                analysis_results.append(overview)
-
-            if fit_data.success:
-                # Add extra analysis results
                 analysis_results.extend(
                     analysis._create_analysis_results(
-                        fit_data=fit_data, quality=quality, **metadata.copy()
-                    )
-                )
-
-                # Draw fit result
-                if self.options.plot:
-                    x_interp = np.linspace(
-                        np.min(formatted_data.x), np.max(formatted_data.x), num=100
-                    )
-                    for model in analysis.models:
-                        y_data_with_uncertainty = eval_with_uncertainties(
-                            x=x_interp,
-                            model=model,
-                            params=fit_data.ufloat_params,
-                        )
-                        y_interp = unp.nominal_values(y_data_with_uncertainty)
-                        # Add fit line data
-                        self.plotter.set_series_data(
-                            model._name + f"_{analysis.name}",
-                            x_interp=x_interp,
-                            y_interp=y_interp,
-                        )
-                        if fit_data.covar is not None:
-                            # Add confidence interval data
-                            y_interp_err = unp.std_devs(y_data_with_uncertainty)
-                            if np.isfinite(y_interp_err).all():
-                                self.plotter.set_series_data(
-                                    model._name + f"_{analysis.name}",
-                                    y_interp_err=y_interp_err,
-                                )
-
-            # Add raw data points
-            if self.options.return_data_points:
-                analysis_results.extend(
-                    analysis._create_curve_data(
-                        curve_data=formatted_data,
-                        models=analysis.models,
+                        fit_data=fit_data,
+                        quality=analysis._evaluate_quality(fit_data),
                         **metadata,
                     )
                 )
 
             fit_dataset[analysis.name] = fit_data
+            composite_curve_data.append(curve_data)
+
+        if self.options.return_fit_parameters:
+            warnings.warn(
+                "Now overview data is stored in the .artifacts of the ExperimentData. "
+                "Enabling this option no longer create new analysis results. ",
+                DeprecationWarning,
+            )
+        if self.options.return_data_points:
+            warnings.warn(
+                "Now curve data is stored in the .artifacts of the ExperimentData. "
+                "Enabling this option no longer create new analysis results.",
+                DeprecationWarning,
+            )
 
         total_quality = self._evaluate_quality(fit_dataset)
-        if red_chi:
-            self.plotter.set_supplementary_data(fit_red_chi=red_chi)
 
         # Create analysis results by combining all fit data
         if total_quality == "good":
@@ -390,9 +416,21 @@ class CompositeCurveAnalysis(BaseAnalysis):
                 fit_data=fit_dataset, quality=total_quality, **self.options.extra.copy()
             )
             analysis_results.extend(primary_results)
-            self.plotter.set_supplementary_data(primary_results=primary_results)
+        else:
+            primary_results = []
 
+        # Save dataset in artifacts
+        # TODO composite analysis may override this entry.
+        #  Need to define some structure.
+        unite_curve_data = pd.concat(composite_curve_data)
+
+        experiment_data.artifacts["curve_fit_overview"] = fit_dataset
+        experiment_data.artifacts["curve_data"] = unite_curve_data
+
+        # Draw figures
         if self.options.plot:
-            return analysis_results, [self.plotter.figure()]
+            figures = self._draw_figures(unite_curve_data, fit_dataset, primary_results)
+        else:
+            figures = []
 
-        return analysis_results, []
+        return analysis_results, figures

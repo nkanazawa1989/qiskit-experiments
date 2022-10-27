@@ -164,7 +164,7 @@ class AnalysisResult:
             result_id=result_id,
             chisq=res_dict["chisq"],
             quality=res_dict["quality"],
-            extra=res_dict["extra"],
+            extra=res_dict["_extra"],
             verified=res_dict["_verified"],
             tags=res_dict["_tags"],
             service=service,

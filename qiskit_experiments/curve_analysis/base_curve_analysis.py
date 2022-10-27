@@ -19,6 +19,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Union
 
 import lmfit
+import pandas as pd
 
 from qiskit_experiments.data_processing import DataProcessor
 from qiskit_experiments.data_processing.processor_library import get_processor
@@ -36,7 +37,6 @@ from qiskit_experiments.visualization import (
     MplDrawer,
 )
 from qiskit_experiments.warnings import deprecated_function
-
 from .curve_data import CurveData, CurveFitResult, ParameterRepr
 
 PARAMS_ENTRY_PREFIX = "@Parameters_"
@@ -164,8 +164,7 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
                 Default to ``False``.
             average_method (str): Method to average the y values when the same x values
                 appear multiple times. One of "sample", "iwv" (i.e. inverse weighted variance),
-                "shots_weighted". See
-                :func:`~qiskit_experiments.curve_analysis.data_processing.mean_xy_data`
+                "shots_weighted". See :mod:`~qiskit_experiments.curve_analysis.formatter`
                 for details. Default to "shots_weighted".
             p0 (Dict[str, float]): Initial guesses for the fit parameters.
                 The dictionary is keyed on the fit parameter names.
@@ -270,7 +269,7 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
         self,
         raw_data: List[Dict],
         models: List[lmfit.Model],
-    ) -> CurveData:
+    ) -> pd.DataFrame:
         """Perform data processing from the experiment result payload.
 
         Args:
@@ -279,10 +278,10 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
                 optionally data sorting keys.
 
         Returns:
-            Processed data that will be sent to the formatter method.
+            Curve analysis dataset.
 
         Raises:
-            DataProcessorError: When model is multi-objective function but
+            DataProcessorError: When model is a multi-objective function but
                 data sorting option is not provided.
             DataProcessorError: When key for x values is not found in the metadata.
         """
@@ -290,27 +289,27 @@ class BaseCurveAnalysis(BaseAnalysis, ABC):
     @abstractmethod
     def _format_data(
         self,
-        curve_data: CurveData,
-    ) -> CurveData:
+        curve_data: pd.DataFrame,
+    ) -> pd.DataFrame:
         """Postprocessing for the processed dataset.
 
         Args:
-            curve_data: Processed dataset created from experiment results.
+            curve_data: Curve analysis dataset.
 
         Returns:
-            Formatted data.
+            Curve analysis dataset with formatted entries.
         """
 
     @abstractmethod
     def _run_curve_fit(
         self,
-        curve_data: CurveData,
+        curve_data: pd.DataFrame,
         models: List[lmfit.Model],
     ) -> CurveFitResult:
         """Perform curve fitting on given data collection and fit models.
 
         Args:
-            curve_data: Formatted data to fit.
+            curve_data: Curve analysis dataset.
             models: A list of LMFIT models that are used to build a cost function
                 for the LMFIT minimizer.
 

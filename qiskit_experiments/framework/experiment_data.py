@@ -269,6 +269,7 @@ class ExperimentData:
         self._result_data = ThreadSafeList()
         self._figures = ThreadSafeOrderedDict(self._db_data.figure_names)
         self._analysis_results = AnalysisResultTable()
+        self.artifacts = ThreadSafeOrderedDict(["experiment_config", "analysis_config"])
 
         self._deleted_figures = deque()
         self._deleted_analysis_results = deque()

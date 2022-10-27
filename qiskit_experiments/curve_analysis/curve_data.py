@@ -16,9 +16,11 @@ Curve data classes.
 import dataclasses
 import itertools
 import inspect
+import warnings
 from typing import Any, Dict, Union, List, Tuple, Optional, Iterable, Callable
 
 import numpy as np
+import pandas as pd
 import uncertainties
 from uncertainties.unumpy import uarray
 from qiskit_experiments.exceptions import AnalysisError
@@ -72,35 +74,46 @@ class SeriesDef:
         object.__setattr__(self, "signature", fitparams)
 
 
-@dataclasses.dataclass(frozen=True)
-class CurveData:
-    """A dataclass that manages the multiple arrays comprising the dataset for fitting.
+class CurveData(pd.DataFrame):
+    """Data frame wrapper to monkey patch attributes for backward compatibility."""
 
-    This dataset can consist of X, Y values from multiple series.
-    To extract curve data of the particular series, :meth:`get_subset_of` can be used.
+    @property
+    def x(self) -> np.ndarray:
+        """Return x values."""
+        warnings.warn(
+            "This property will be removed. Use dataframe directly.",
+            PendingDeprecationWarning
+        )
+        return self["x_val"].to_numpy(dtype=float)
 
-    Attributes:
-        x: X-values that experiment sweeps.
-        y: Y-values that observed and processed by the data processor.
-        y_err: Uncertainty of the Y-values which is created by the data processor.
-            Usually this assumes standard error.
-        shots: Number of shots used in the experiment to obtain the Y-values.
-        data_allocation: List with identical size with other arrays.
-            The value indicates the series index of the corresponding element.
-            This is classified based upon the matching of :attr:`SeriesDef.filter_kwargs`
-            with the circuit metadata of the corresponding data index.
-            If metadata doesn't match with any series definition, element is filled with ``-1``.
-        labels: List of curve labels. The list index corresponds to the series index.
-    """
+    @property
+    def y(self) -> np.ndarray:
+        """Return y values."""
+        warnings.warn(
+            "This property will be removed. Use dataframe directly.",
+            PendingDeprecationWarning
+        )
+        return self["y_val"].to_numpy(dtype=float)
 
-    x: np.ndarray
-    y: np.ndarray
-    y_err: np.ndarray
-    shots: np.ndarray
-    data_allocation: np.ndarray
-    labels: List[str]
+    @property
+    def y_err(self) -> np.ndarray:
+        """Return y value errors."""
+        warnings.warn(
+            "This property will be removed. Use dataframe directly.",
+            PendingDeprecationWarning
+        )
+        return self["y_err"].to_numpy(dtype=float)
 
-    def get_subset_of(self, index: Union[str, int]) -> "CurveData":
+    @property
+    def shots(self) -> np.ndarray:
+        """Return shot values."""
+        warnings.warn(
+            "This property will be removed. Use dataframe directly.",
+            PendingDeprecationWarning
+        )
+        return self["shots"].to_numpy(dtype=float)
+
+    def get_subset_of(self, index: Union[str, int]) -> pd.DataFrame:
         """Filter data by series name or index.
 
         Args:
@@ -109,22 +122,17 @@ class CurveData:
         Returns:
             A subset of data corresponding to a particular series.
         """
-        if isinstance(index, int):
-            _index = index
-            _name = self.labels[index]
-        else:
-            _index = self.labels.index(index)
-            _name = index
-
-        locs = self.data_allocation == _index
-        return CurveData(
-            x=self.x[locs],
-            y=self.y[locs],
-            y_err=self.y_err[locs],
-            shots=self.shots[locs],
-            data_allocation=np.full(np.count_nonzero(locs), _index),
-            labels=[_name],
+        warnings.warn(
+            "This property will be removed. Use dataframe directly.",
+            PendingDeprecationWarning
         )
+        if isinstance(index, int):
+            cond = self.model_index == index
+        else:
+            cond = self.model_name == index
+        out = self[cond]
+        out.__class__ = CurveData
+        return out
 
 
 class CurveFitResult:
