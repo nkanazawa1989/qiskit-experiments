@@ -153,7 +153,7 @@ class AnalysisResult:
         self._db_data.quality = self.RESULT_QUALITY_TO_TEXT.get(self._db_data.quality, "unknown")
 
     @classmethod
-    def from_pandas(cls, result_id, series, service):
+    def from_pandas(cls, series, service):
         res_dict = series.to_dict()
 
         return AnalysisResult(
@@ -161,7 +161,7 @@ class AnalysisResult:
             value=res_dict["value"],
             device_components=res_dict["device_components"],
             experiment_id=res_dict["_experiment_id"],
-            result_id=result_id,
+            result_id=series["_result_id"],
             chisq=res_dict["chisq"],
             quality=res_dict["quality"],
             extra=res_dict["_extra"],

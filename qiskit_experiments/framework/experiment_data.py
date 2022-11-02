@@ -1298,7 +1298,7 @@ class ExperimentData:
         block: bool = True,
         timeout: Optional[float] = None,
         dataframe: bool = False,
-    ) -> pd.DataFrame:
+    ) -> Union[pd.DataFrame, pd.Series]:
         """Return analysis results associated with this experiment.
 
         Args:
@@ -1328,18 +1328,7 @@ class ExperimentData:
             )
         self._retrieve_analysis_results(refresh=refresh)
 
-        if dataframe is False:
-            warnings.warn(
-                "Returning analysis results in 'AnalysisResult' class has been deprecated. "
-                "Now data is returned in the convenient table format. "
-                "Set 'dataframe=True' to use new format.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            results = filter_analysis_result(index, self._analysis_results.full_table())
-        else:
-            results = filter_analysis_result(index, self._analysis_results.truncated_table())
-
+        results = filter_analysis_result(index, self._analysis_results)
         if results is None:
             msg = [f"Analysis result {index} not found."]
             errors = self.errors()
@@ -1348,15 +1337,35 @@ class ExperimentData:
             raise ExperimentEntryNotFound("\n".join(msg))
 
         if dataframe is False:
+            warnings.warn(
+                "Returning analysis results in 'AnalysisResult' class has been deprecated. "
+                "Now data is returned in the convenient table format. "
+                "Set 'dataframe=True' to use new format.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             # Convert back into AnalysisResult class
+            if isinstance(results, pd.Series):
+                # Single entry
+                return AnalysisResult.from_pandas(results, self._service)
+            # Multiple results
             legacy_results = []
-            for result_id, series in results.iterrows():
-                result = AnalysisResult.from_pandas(result_id, series, self._service)
+            for _, series in results.iterrows():
+                # Do not use truncated ID for communication with service
+                result = AnalysisResult.from_pandas(series, self._service)
                 legacy_results.append(result)
             if len(legacy_results) == 1:
                 return legacy_results[0]
             return legacy_results
-        return results
+
+        if isinstance(results, pd.Series):
+            # This returns a single entry as dict-like.
+            # All property can be shown nicely.
+            return results
+        # This returns a data frame.
+        # So underscored properties must be hidden for better visualization.
+        to_show = [c for c in self._analysis_results.get_columns() if not c.startswith("_")]
+        return results[to_show]
 
     # Save and load from the database
 
@@ -2257,13 +2266,18 @@ def service_exception_to_warning():
         LOG.warning("Experiment service operation failed: %s", traceback.format_exc())
 
 
-def filter_analysis_result(index: Union[int, slice, str], data: pd.DataFrame) -> pd.DataFrame:
+def filter_analysis_result(
+    index: Union[int, slice, str],
+    data: AnalysisResultTable,
+) -> Union[pd.DataFrame, pd.Series]:
     """Helper generic function to search analysis results."""
-    filt_data = _filter_analysis_result(index, data)
+    filt_data = _filter_analysis_result(index, data.full_table())
 
     if isinstance(filt_data, pd.Series):
-        return pd.DataFrame([filt_data])
-    return data
+        # If there is a single entry this returns full information
+        # as a vertically aligned single table.
+        return filt_data
+    return filt_data
 
 
 @functools.singledispatch
@@ -2283,7 +2297,7 @@ def _(index: int, data: pd.DataFrame):
 @_filter_analysis_result.register
 def _(index: slice, data: pd.DataFrame):
     results = data[index]
-    if not results:
+    if len(results) == 0:
         return None
     return results
 
@@ -2296,7 +2310,7 @@ def _(index: str, data: pd.DataFrame):
     else:
         # Check by name
         results = data[data["name"] == index]
-        if not results:
+        if len(results) == 0:
             return None
     return results
 
