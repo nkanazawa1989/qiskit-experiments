@@ -1176,7 +1176,7 @@ class ExperimentData:
                     to_add[key] = getattr(result, search_key)
                 else:
                     to_add[key] = None
-            self._analysis_results.add_data(entry_id=result.result_id, **to_add)
+            self._analysis_results.add_data(**to_add)
 
             with contextlib.suppress(ExperimentDataError):
                 result.service = self.service
@@ -1231,9 +1231,7 @@ class ExperimentData:
                 to_add["_extra"][key] = value
             else:
                 to_add[key] = value
-
-        result_id = result_id or str(uuid.uuid4())
-        self._analysis_results.add_data(entry_id=result_id, **to_add)
+        self._analysis_results.add_data(**to_add)
 
         # For autosave. In future generation of AnalysisResult should be bypassed.
         if self.auto_save and self._service:

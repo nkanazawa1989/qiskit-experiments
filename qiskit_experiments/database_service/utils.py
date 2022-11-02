@@ -381,11 +381,10 @@ class ThreadSafeDataFrame(ThreadSafeContainer):
         with self._lock:
             return self.truncated_table()._repr_html_()
 
-    def add_data(self, entry_id: Optional[str] = None, **kwargs):
+    def add_data(self, **kwargs):
         """Add new data.
 
         Args:
-            entry_id: Unique name of this entry.
             kwargs: Data of new entry to register. Key must agree with column names.
 
         Raises:
@@ -397,9 +396,18 @@ class ThreadSafeDataFrame(ThreadSafeContainer):
             raise KeyError(f"Invalid keys {missing} are found. These keys are not defined.")
         template = dict.fromkeys(columns)
         template.update(kwargs)
-        entry_id = entry_id or str(uuid.uuid4())
+
+        # Create result id with UUID4
+        # Use first 8 characters as a name. Check ID collision in this table.
         with self._lock:
-            self._container.loc[entry_id] = list(template.values())
+            while True:
+                entry_id = uuid.uuid4()
+                name = entry_id.hex[:8]
+                if name in self._container.index:
+                    continue
+                template["_result_id"] = str(entry_id)
+                break
+            self._container.loc[name] = list(template.values())
 
     def concat(self, other: pd.DataFrame):
         """Thread safe concatenation of data frame.
@@ -437,4 +445,5 @@ class AnalysisResultTable(ThreadSafeDataFrame):
             "_tags",
             "_source",
             "_created_in_db",
+            "_result_id",
         ]
