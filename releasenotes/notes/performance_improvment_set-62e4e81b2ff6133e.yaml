@@ -1,0 +1,11 @@
+---
+upgrade:
+  - |
+    Optimizing code withs sets on ThreadSafeDataFrame class 
+    that located qiskit_experiments/database_service/utils.py
+    new variable added 'self._indexes', this variable holds unique
+    indexes as set so it make faster 'not in' operator
+    functions changed according to this new variable
+    tmp_columns_set = set(self.get_columns()) added in line 348
+    also this make code faster in line 349
+
