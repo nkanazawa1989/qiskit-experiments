@@ -26,6 +26,7 @@ import pandas as pd
 import dateutil.parser
 import pkg_resources
 from dateutil import tz
+import matplotlib.pyplot as pyplot
 
 from qiskit.version import __version__ as terra_version
 
@@ -81,7 +82,7 @@ def utc_to_local(utc_dt: datetime) -> datetime:
     return local_dt
 
 
-def plot_to_svg_bytes(figure: "pyplot.Figure") -> bytes:
+def plot_to_svg_bytes(figure: pyplot.Figure) -> bytes:
     """Convert a pyplot Figure to SVG in bytes.
 
     Args:
@@ -294,6 +295,7 @@ class ThreadSafeDataFrame(ThreadSafeContainer):
         """ThreadSafeContainer constructor."""
         self._columns = self._default_columns()
         self._extra = []
+        self._indexes = set()
         super().__init__(init_values)
 
     @classmethod
@@ -311,13 +313,16 @@ class ThreadSafeDataFrame(ThreadSafeContainer):
                     f"Input data frame contains unexpected columns {input_columns}. "
                     f"{self.__class__.__name__} defines {self.get_columns()} as default columns."
                 )
+            self._indexes = set(init_values.index.values.tolist())
             return init_values
         if isinstance(init_values, dict):
-            return pd.DataFrame.from_dict(
+            df = pd.DataFrame.from_dict(
                 data=init_values,
                 orient="index",
                 columns=self.get_columns(),
             )
+            self._indexes = set(df.index.values.tolist())
+            return df
         raise TypeError(f"Initial value of {type(init_values)} is not valid data type.")
 
     def get_columns(self) -> List[str]:
@@ -340,7 +345,8 @@ class ThreadSafeDataFrame(ThreadSafeContainer):
         """
         with self._lock:
             # Order sensitive
-            new_columns = [c for c in new_columns if c not in self.get_columns()]
+            tmp_columns_set = set(self.get_columns())
+            new_columns = [c for c in new_columns if c not in tmp_columns_set]
             if len(new_columns) == 0:
                 return
 
@@ -356,6 +362,7 @@ class ThreadSafeDataFrame(ThreadSafeContainer):
             self._container = self._init_container()
             self._columns = self._default_columns()
             self._extra = []
+            self._indexes.clear()
 
     def container(
         self,
@@ -389,8 +396,9 @@ class ThreadSafeDataFrame(ThreadSafeContainer):
             ValueError: When index is not in this table.
         """
         with self._lock:
-            if index not in self._container.index:
+            if index not in self._indexes:
                 raise ValueError(f"Table index {index} doesn't exist in this table.")
+            self._indexes.remove(int(index))
             self._container.drop(index, inplace=True)
 
     def get_entry(
@@ -409,7 +417,7 @@ class ThreadSafeDataFrame(ThreadSafeContainer):
             ValueError: When index is not in this table.
         """
         with self._lock:
-            if index not in self._container.index:
+            if index not in self._indexes:
                 raise ValueError(f"Table index {index} doesn't exist in this table.")
 
             return self._container.loc[index]
@@ -432,7 +440,7 @@ class ThreadSafeDataFrame(ThreadSafeContainer):
             ValueError: When index is not unique in this table.
         """
         with self._lock:
-            if index in self._container.index:
+            if index in self._indexes:
                 raise ValueError(f"Table index {index} already exists in the table.")
 
             columns = self.get_columns()
@@ -446,7 +454,7 @@ class ThreadSafeDataFrame(ThreadSafeContainer):
             if not isinstance(index, str):
                 index = str(index)
             self._container.loc[index] = list(template.values())
-
+            self._indexes.add(len(self._container.values))
             return self._container.iloc[-1]
 
     def _repr_html_(self) -> Union[str, None]:
