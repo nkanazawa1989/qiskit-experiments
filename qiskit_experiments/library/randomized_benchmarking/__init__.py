@@ -21,8 +21,13 @@ Experiments
 ===========
 .. autosummary::
     :toctree: ../stubs/
+    :template: autosummary/experiment.rst
 
     StandardRB
+
+.. autosummary::
+    :toctree: ../stubs/
+
     InterleavedRB
 
 

@@ -70,8 +70,12 @@ class RBAnalysis(curve.CurveAnalysis):
     def _default_options(cls):
         """Return default options.
 
-        See :meth:`~qiskit_experiment.curve_analysis.CurveAnalysis._default_options` for
-        descriptions of analysis options.
+        Analysis Options:
+            error_dict (Type): Optional. Error estimates for gates from the backend properties.
+            epg_1_qubit (Type): Optional. EPG data for the 1-qubit gate involved, assumed to
+                have been obtained from previous experiments.
+                This is used to estimate the 2-qubit EPG.
+            gate_error_ratio (Type): An estimate for the ratios between errors on different gates.
         """
         default_options = super()._default_options()
         default_options.p0 = {"a": None, "alpha": None, "b": None}

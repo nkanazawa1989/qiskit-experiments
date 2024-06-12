@@ -22,8 +22,13 @@ Verification Experiments
 
 .. autosummary::
     :toctree: ../stubs/
+    :template: autosummary/experiment.rst
 
     ~randomized_benchmarking.StandardRB
+
+.. autosummary::
+    :toctree: ../stubs/
+
     ~randomized_benchmarking.InterleavedRB
     ~tomography.StateTomography
     ~tomography.ProcessTomography
